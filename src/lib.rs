@@ -1,13 +1,15 @@
 #![allow(unused)]
 
 use std::alloc::{self, Layout};
-use std::cmp;
+use std::borrow::Borrow;
+use std::cmp::{self, Ordering};
+use std::fmt::{self, Debug, Formatter};
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
 use std::ptr::{self, NonNull};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 /// A reference-counted thin vector.
 ///
@@ -160,7 +162,7 @@ impl<T> EcoVec<T> {
         }
 
         unsafe {
-            self.header_mut().len - 1;
+            self.header_mut().len -= 1;
             let val = ptr::read(self.data().add(index));
             ptr::copy(
                 self.data().add(index + 1),
@@ -318,11 +320,117 @@ impl<T> EcoVec<T> {
     }
 }
 
+unsafe impl<T: Sync> Sync for EcoVec<T> {}
+unsafe impl<T: Send> Send for EcoVec<T> {}
+
+impl<T> Drop for EcoVec<T> {
+    fn drop(&mut self) {
+        if !self.is_empty() {
+            unsafe {
+                ptr::drop_in_place(self.as_mut_slice());
+                alloc::dealloc(self.ptr.as_ptr() as *mut u8, Self::layout(self.capacity()));
+            }
+        }
+    }
+}
+
 impl<T> Deref for EcoVec<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
         self.as_slice()
+    }
+}
+
+impl<T> Borrow<[T]> for EcoVec<T> {
+    fn borrow(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> AsRef<[T]> for EcoVec<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> Default for EcoVec<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Debug> Debug for EcoVec<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        self.as_slice().fmt(f)
+    }
+}
+
+impl<T: Clone> Clone for EcoVec<T> {
+    fn clone(&self) -> Self {
+        todo!()
+    }
+}
+
+impl<T: Hash> Hash for EcoVec<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
+impl<T: Eq> Eq for EcoVec<T> {}
+
+impl<T: PartialEq> PartialEq for EcoVec<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl<T: PartialEq> PartialEq<[T]> for EcoVec<T> {
+    fn eq(&self, other: &[T]) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for EcoVec<T> {
+    fn eq(&self, other: &[T; N]) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl<T: PartialEq> PartialEq<Vec<T>> for EcoVec<T> {
+    fn eq(&self, other: &Vec<T>) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl<T: PartialEq> PartialEq<EcoVec<T>> for [T] {
+    fn eq(&self, other: &EcoVec<T>) -> bool {
+        self == other.as_slice()
+    }
+}
+
+impl<T: PartialEq, const N: usize> PartialEq<EcoVec<T>> for [T; N] {
+    fn eq(&self, other: &EcoVec<T>) -> bool {
+        self == other.as_slice()
+    }
+}
+
+impl<T: PartialEq> PartialEq<EcoVec<T>> for Vec<T> {
+    fn eq(&self, other: &EcoVec<T>) -> bool {
+        self == other.as_slice()
+    }
+}
+
+impl<T: Ord> Ord for EcoVec<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.as_slice().cmp(&other.as_slice())
+    }
+}
+
+impl<T: PartialOrd> PartialOrd for EcoVec<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.as_slice().partial_cmp(&other.as_slice())
     }
 }
 
@@ -372,16 +480,17 @@ mod tests {
 
         assert_eq!(vec.len(), 5);
         assert_eq!(vec.capacity(), 8);
-        assert_eq!(&vec[..], &["hello,", "world!", "what's", "going", "on?"]);
+        assert_eq!(vec, ["hello,", "world!", "what's", "going", "on?"]);
         assert_eq!(vec.pop(), Some("on?"));
         assert_eq!(vec.len(), 4);
         assert_eq!(vec.last(), Some(&"going"));
         assert_eq!(vec.remove(1), "world!");
+        assert_eq!(vec.len(), 3);
         assert_eq!(vec[1], "what's");
         vec.push("where?");
         vec.insert(1, "wonder!");
         vec.retain(|s| s.starts_with("w"));
-        assert_eq!(vec.as_slice(), &["wonder!", "what's", "where?"]);
+        assert_eq!(vec, ["wonder!", "what's", "where?"]);
         vec.truncate(1);
         assert_eq!(vec.last(), vec.first());
     }
