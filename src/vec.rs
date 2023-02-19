@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use std::alloc::{self, Layout};
 use std::borrow::Borrow;
 use std::cmp::{self, Ordering};
@@ -11,10 +9,12 @@ use std::ops::Deref;
 use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
-/// A reference-counted thin vector.
+/// An economical vector with clone-on-write semantics.
 ///
 /// Has a size of one word and is null-pointer optimized (meaning that
 /// `Option<EcoVec<T>>` also takes only one word).
+///
+/// Mutating methods require `T: Clone` due to clone-on-write semantics.
 pub struct EcoVec<T> {
     /// Must always point to a valid header.
     ///
@@ -28,6 +28,7 @@ pub struct EcoVec<T> {
 /// The start of the data.
 ///
 /// This is followed by padding, if necessary, and then the actual data.
+#[derive(Debug)]
 struct Header {
     refs: AtomicUsize,
     len: usize,
@@ -261,8 +262,11 @@ impl<T: Clone> EcoVec<T> {
 
     /// Reserve space for at least `additional` more elements.
     ///
-    /// Clones the vector if the current capacity isn't already sufficient.
+    /// Clones the vector if its reference count is larger than 1 or if the
+    /// current capacity isn't already sufficient.
     pub fn reserve(&mut self, additional: usize) {
+        self.make_unique();
+
         let len = self.len();
         let capacity = self.capacity();
         if additional > capacity - len {
@@ -272,7 +276,6 @@ impl<T: Clone> EcoVec<T> {
                 .max(2 * capacity)
                 .max(Self::min_cap());
 
-            self.make_unique();
             unsafe {
                 // Safety: TODO.
                 self.grow(target);
@@ -320,10 +323,10 @@ impl<T> EcoVec<T> {
     /// Extracts a mutable slice containing the entire vector without checking
     /// the reference count.
     ///
-    /// May only be called if the reference count is `1`.
+    /// May only be called if the reference count is at most `1`.
     #[track_caller]
     unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [T] {
-        debug_assert_eq!(self.header().refs.load(Relaxed), 1);
+        debug_assert!(self.header().refs.load(Relaxed) <= 1);
         std::slice::from_raw_parts_mut(self.data_mut(), self.len())
     }
 
@@ -401,10 +404,8 @@ impl<T> EcoVec<T> {
 impl<T: Clone> EcoVec<T> {
     /// Ensure that this vector has a unique backing allocation.
     fn make_unique(&mut self) {
-        if self.header().refs.fetch_sub(1, Release) > 1 {
+        if self.header().refs.load(Relaxed) > 1 {
             *self = self.iter().cloned().collect();
-        } else {
-            self.header().refs.store(1, Release);
         }
     }
 }
@@ -571,6 +572,12 @@ impl<T: Clone> Extend<T> for EcoVec<T> {
         for value in iter {
             self.push(value);
         }
+    }
+}
+
+impl<T: Clone> From<&[T]> for EcoVec<T> {
+    fn from(slice: &[T]) -> Self {
+        slice.iter().cloned().collect()
     }
 }
 
