@@ -7,7 +7,7 @@ Compact, clone-on-write vector and string.
   whole vector is null-pointer optimized.
 
 - The [`EcoString`] takes up 16 bytes of space. It has 14 bytes of inline
-  storage and starting from 15 bytes it becomes an `EcoVec<u8>`.
+  storage and starting from 15 bytes it becomes an [`EcoVec<u8>`].
 */
 
 mod string;

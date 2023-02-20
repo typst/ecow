@@ -1,4 +1,4 @@
-use std::borrow::{Borrow, Cow};
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
@@ -42,10 +42,7 @@ const LIMIT: usize = 14;
 impl EcoString {
     /// Create a new, empty string.
     pub const fn new() -> Self {
-        Self(Repr::Small {
-            buf: [0; LIMIT],
-            len: 0,
-        })
+        Self(Repr::Small { buf: [0; LIMIT], len: 0 })
     }
 
     /// Create a new, empty string with the given `capacity`.
@@ -58,16 +55,13 @@ impl EcoString {
     }
 
     /// Create an instance from an existing string-like type.
-    pub fn from_str_like(string: impl AsRef<str>) -> Self {
+    fn from_str_like(string: impl AsRef<str>) -> Self {
         let string = string.as_ref();
         let len = string.len();
         Self(if len <= LIMIT {
             let mut buf = [0; LIMIT];
             buf[..len].copy_from_slice(string.as_bytes());
-            Repr::Small {
-                buf,
-                len: len as u8,
-            }
+            Repr::Small { buf, len: len as u8 }
         } else {
             Repr::Large(string.as_bytes().into())
         })
@@ -183,10 +177,7 @@ impl EcoString {
                 for i in 0..n {
                     buf[prev * i..prev * (i + 1)].copy_from_slice(src);
                 }
-                return Self(Repr::Small {
-                    buf,
-                    len: new as u8,
-                });
+                return Self(Repr::Small { buf, len: new as u8 });
             }
         }
 
@@ -252,6 +243,12 @@ impl PartialEq<&str> for EcoString {
     }
 }
 
+impl PartialEq<String> for EcoString {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str().eq(other)
+    }
+}
+
 impl PartialEq<EcoString> for str {
     fn eq(&self, other: &EcoString) -> bool {
         self.eq(other.as_str())
@@ -261,6 +258,12 @@ impl PartialEq<EcoString> for str {
 impl PartialEq<EcoString> for &str {
     fn eq(&self, other: &EcoString) -> bool {
         (*self).eq(other.as_str())
+    }
+}
+
+impl PartialEq<EcoString> for String {
+    fn eq(&self, other: &EcoString) -> bool {
+        self.eq(other.as_str())
     }
 }
 
@@ -325,10 +328,7 @@ impl From<char> for EcoString {
     fn from(c: char) -> Self {
         let mut buf = [0; LIMIT];
         let len = c.encode_utf8(&mut buf).len();
-        Self(Repr::Small {
-            buf,
-            len: len as u8,
-        })
+        Self(Repr::Small { buf, len: len as u8 })
     }
 }
 
@@ -339,17 +339,10 @@ impl From<&str> for EcoString {
 }
 
 impl From<String> for EcoString {
+    /// When the string does not fit inline, this needs to allocate to change
+    /// the layout.
     fn from(s: String) -> Self {
         Self::from_str_like(s)
-    }
-}
-
-impl From<Cow<'_, str>> for EcoString {
-    fn from(s: Cow<str>) -> Self {
-        match s {
-            Cow::Borrowed(s) => s.into(),
-            Cow::Owned(s) => s.into(),
-        }
     }
 }
 
@@ -382,6 +375,7 @@ impl Extend<char> for EcoString {
 }
 
 impl From<EcoString> for String {
+    /// This needs to allocate to change the layout.
     fn from(s: EcoString) -> Self {
         s.as_str().to_owned()
     }

@@ -9,12 +9,26 @@ use std::ops::Deref;
 use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
+/// Create a new [`EcoVec`] from a format string.
+#[macro_export]
+macro_rules! eco_vec {
+    () => { $crate::EcoVec::new() };
+    ($elem:expr; $n:expr) => { $crate::EcoVec::from_elem($elem, $n) };
+    ($($value:expr),+ $(,)?) => {{
+        let capacity = 0 $(+ $crate::eco_vec!(@count $value))*;
+        let mut vec = $crate::EcoVec::with_capacity(capacity);
+        $(vec.push($value);)*
+        vec
+    }};
+    (@count $value:expr) => { 1 };
+}
+
 /// An economical vector with clone-on-write semantics.
 ///
 /// Has a size of one word and is null-pointer optimized (meaning that
 /// `Option<EcoVec<T>>` also takes only one word).
 ///
-/// Mutating methods require `T: Clone` due to clone-on-write semantics.
+/// Most mutating methods require `T: Clone` due to clone-on-write semantics.
 pub struct EcoVec<T> {
     /// Must always point to a valid header.
     ///
@@ -157,6 +171,15 @@ impl<T> EcoVec<T> {
 }
 
 impl<T: Clone> EcoVec<T> {
+    /// Create a new vector with `n` copies of `value`.
+    pub fn from_elem(value: T, n: usize) -> Self {
+        let mut vec = Self::with_capacity(n);
+        for _ in 0..n {
+            vec.push(value.clone());
+        }
+        vec
+    }
+
     /// Produce a mutable slice containing the entire vector.
     ///
     /// Clones the vector if its reference count is larger than 1.
@@ -358,8 +381,8 @@ impl<T: Clone> EcoVec<T> {
 
     /// Reserve space for at least `additional` more elements.
     ///
-    /// Clones the vector if its reference count is larger than 1 or if the
-    /// current capacity isn't already sufficient.
+    /// Rellocates if the the current capacity isn't sufficient or if the
+    /// vector's reference count is larger than 1.
     pub fn reserve(&mut self, additional: usize) {
         self.make_unique();
 
@@ -389,6 +412,10 @@ impl<T: Clone> EcoVec<T> {
     /// Retains only the elements specified by the predicate.
     ///
     /// Clones the vector if its reference count is larger than 1.
+    ///
+    /// Note that this clones the vector even if `f` always returns `false`. To
+    /// prevent that, you can first iterate over the vector yourself and then
+    /// only call `retain` if your condition is `false` for some element.
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
@@ -432,36 +459,34 @@ impl<T> EcoVec<T> {
 
         let len = self.len();
         let layout = Self::layout(target);
-        unsafe {
-            let ptr = if !self.is_allocated() {
-                // Safety:
-                // The layout has non-zero size because `target > 0`.
-                alloc::alloc(layout)
-            } else {
-                // Safety:
-                // - `self.ptr` was allocated before (just checked)
-                // - the old block was allocated with the current capacity
-                // - `Self::size()` guarantees to return a value that is `> 0`
-                //   and rounded up to the nearest multiple of `Self::align()`
-                //   does not overflow `isize::MAX`.
-                alloc::realloc(
-                    self.ptr.as_ptr() as *mut u8,
-                    Self::layout(self.capacity()),
-                    Self::size(target),
-                )
-            };
-
-            // If non-null the pointer points to a valid allocation.
-            self.ptr = NonNull::new(ptr as *mut Header)
-                .unwrap_or_else(|| alloc::handle_alloc_error(layout));
-
+        let ptr = if !self.is_allocated() {
             // Safety:
-            // The freshly allocated pointer is valid for a write of the header.
-            ptr::write(
-                self.ptr.as_ptr(),
-                Header { refs: AtomicUsize::new(1), len, capacity: target },
-            );
-        }
+            // The layout has non-zero size because `target > 0`.
+            alloc::alloc(layout)
+        } else {
+            // Safety:
+            // - `self.ptr` was allocated before (just checked)
+            // - the old block was allocated with the current capacity
+            // - `Self::size()` guarantees to return a value that is `> 0`
+            //   and rounded up to the nearest multiple of `Self::align()`
+            //   does not overflow `isize::MAX`.
+            alloc::realloc(
+                self.ptr.as_ptr() as *mut u8,
+                Self::layout(self.capacity()),
+                Self::size(target),
+            )
+        };
+
+        // If non-null the pointer points to a valid allocation.
+        self.ptr = NonNull::new(ptr as *mut Header)
+            .unwrap_or_else(|| alloc::handle_alloc_error(layout));
+
+        // Safety:
+        // The freshly allocated pointer is valid for a write of the header.
+        ptr::write(
+            self.ptr.as_ptr(),
+            Header { refs: AtomicUsize::new(1), len, capacity: target },
+        );
     }
 
     /// Extracts a mutable slice containing the entire vector without checking
@@ -768,6 +793,13 @@ impl<T: Clone> From<&[T]> for EcoVec<T> {
     }
 }
 
+impl<T: Clone> From<Vec<T>> for EcoVec<T> {
+    /// This needs to allocate to change the layout.
+    fn from(vec: Vec<T>) -> Self {
+        vec.into_iter().collect()
+    }
+}
+
 #[cold]
 fn capacity_overflow() -> ! {
     panic!("capacity overflow");
@@ -804,6 +836,11 @@ mod tests {
         assert_eq!(vec, ["wonder!", "what's", "where?"]);
         vec.truncate(1);
         assert_eq!(vec.last(), vec.first());
+    }
+
+    #[test]
+    fn test_vec_macro() {
+        assert_eq!(eco_vec![Box::new(1); 3], vec![Box::new(1); 3]);
     }
 
     #[test]
