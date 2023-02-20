@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
 use std::ptr::{self, NonNull};
-use std::sync::atomic::{AtomicUsize, Ordering::*};
+use std::sync::atomic::{self, AtomicUsize, Ordering::*};
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
@@ -179,7 +179,7 @@ impl<T> EcoVec<T> {
 
         // If there are other vectors that reference the same backing
         // allocation, we just create a new, empty vector.
-        if self.is_shared() {
+        if !self.is_unique() {
             // If another vector was dropped in the meantime, this vector could
             // have become unique, but we don't care, creating a new one
             // is safe nonetheless. Note that this runs the vector's drop
@@ -408,7 +408,7 @@ impl<T: Clone> EcoVec<T> {
             return;
         }
 
-        if self.is_shared() {
+        if !self.is_unique() {
             // Safety: Just checked bounds.
             *self = Self::from(unsafe { self.get_unchecked(..target) });
             return;
@@ -440,7 +440,6 @@ impl<T: Clone> EcoVec<T> {
     /// Guarantees that the resulting vector has reference count `1` and space
     /// for `additional` more elements.
     pub fn reserve(&mut self, additional: usize) {
-        let shared = self.is_shared();
         let len = self.len();
         let capacity = self.capacity();
 
@@ -457,7 +456,7 @@ impl<T: Clone> EcoVec<T> {
                 .max(Self::min_cap());
         }
 
-        if shared {
+        if !self.is_unique() {
             let mut vec = Self::with_capacity(target);
             vec.extend(self.iter().cloned());
             *self = vec;
@@ -551,7 +550,6 @@ impl<T> EcoVec<T> {
     #[inline]
     unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [T] {
         // Safety: See `Self::as_slice()`.
-        debug_assert!(!self.is_shared());
         std::slice::from_raw_parts_mut(self.data_mut(), self.len())
     }
 
@@ -579,12 +577,6 @@ impl<T> EcoVec<T> {
     #[inline]
     fn is_allocated(&self) -> bool {
         self.ptr.as_ptr() as *const Header != &EMPTY as *const Header
-    }
-
-    /// Whether another instance is pointing to the same backing allocation.
-    #[inline]
-    fn is_shared(&self) -> bool {
-        self.header().refs.load(Relaxed) > 1
     }
 
     /// The data pointer.
@@ -712,7 +704,7 @@ impl<T: Clone> EcoVec<T> {
     ///
     /// May change the capacity.
     fn make_unique(&mut self) {
-        if self.is_shared() {
+        if !self.is_unique() {
             *self = Self::from(self.as_slice());
         }
     }
@@ -749,6 +741,39 @@ impl EcoVec<u8> {
 unsafe impl<T: Sync> Sync for EcoVec<T> {}
 unsafe impl<T: Send> Send for EcoVec<T> {}
 
+impl<T> EcoVec<T> {
+    /// Whether no other vector is pointing to the same backing allocation.
+    ///
+    /// This takes a mutable reference because only callers with ownership or a
+    /// mutable reference can ensure that the result stays relevant. Potential
+    /// callers with a shared reference could read `true` while another shared
+    /// reference is cloned on a different thread, bumping the ref-count. By
+    /// restricting this callers with mutable access, we ensure that no
+    /// uncontrolled cloning is happening in the time between the `is_unique`
+    /// call and any subsequent mutation.
+    #[inline]
+    fn is_unique(&mut self) -> bool {
+        // See Arc's is_unique() method.
+        self.header().refs.load(Acquire) == 1
+    }
+}
+
+impl<T: Clone> Clone for EcoVec<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        // If the vector has a backing allocation, bump the ref-count.
+        if self.is_allocated() {
+            // See Arc's clone impl for details about ordering and aborting.
+            let prev = self.header().refs.fetch_add(1, Relaxed);
+            if prev > isize::MAX as usize {
+                std::process::abort();
+            }
+        }
+
+        Self { ptr: self.ptr, phantom: PhantomData }
+    }
+}
+
 impl<T> Drop for EcoVec<T> {
     fn drop(&mut self) {
         // Nothing to do if there is no backing allocation.
@@ -758,9 +783,13 @@ impl<T> Drop for EcoVec<T> {
 
         // Drop our ref-count. If there was more than one vector before
         // (including this one), we shouldn't deallocate.
-        if self.header().refs.fetch_sub(1, Release) > 1 {
+        // See Arc's drop impl for details about memory ordering.
+        if self.header().refs.fetch_sub(1, Release) != 1 {
             return;
         }
+
+        // See Arc's drop impl for details.
+        atomic::fence(Acquire);
 
         unsafe {
             // Safety:
@@ -811,22 +840,6 @@ impl<T: Debug> Debug for EcoVec<T> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.as_slice().fmt(f)
-    }
-}
-
-impl<T: Clone> Clone for EcoVec<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        // If the vector has a backing allocation, bump the ref-count.
-        if self.is_allocated() {
-            // See Arc's clone impl for details about ordering and aborting.
-            let prev = self.header().refs.fetch_add(1, Relaxed);
-            if prev > isize::MAX as usize {
-                std::process::abort();
-            }
-        }
-
-        Self { ptr: self.ptr, phantom: PhantomData }
     }
 }
 
@@ -963,9 +976,9 @@ impl<T: Clone> IntoIterator for EcoVec<T> {
     type Item = T;
 
     #[inline]
-    fn into_iter(self) -> Self::IntoIter {
+    fn into_iter(mut self) -> Self::IntoIter {
         IntoIter {
-            unique: !self.is_shared(),
+            unique: self.is_unique(),
             front: 0,
             back: self.len(),
             vec: self,
