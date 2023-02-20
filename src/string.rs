@@ -24,8 +24,10 @@ macro_rules! format_eco {
 /// An economical string with inline storage and clone-on-write semantics.
 ///
 /// This type has a size of 16 bytes and is null-pointer optimized (meaning that
-/// `Option<EcoString>` also takes 16 bytes). It has 14 bytes of inline storage
-/// and starting from 15 bytes it becomes an `EcoVec<u8>`.
+/// [`Option<EcoString>`] also takes 16 bytes). It has 14 bytes of inline
+/// storage and starting from 15 bytes it becomes an [`EcoVec<u8>`]. The
+/// internal reference counter of the heap variant is atomic, making this type
+/// [`Sync`] and [`Send`].
 ///
 /// # Example
 /// ```
@@ -95,13 +97,13 @@ impl EcoString {
         let string = string.as_ref();
         let len = string.len();
         let mut buf = [0; LIMIT];
-        Self(if let Some(head) = buf.get_mut(..len) {
+        if let Some(head) = buf.get_mut(..len) {
             // We maintain `len < LIMIT` because `get_mut` succeeded.
             head.copy_from_slice(string.as_bytes());
-            Repr::Small { buf, len: len as u8 }
+            Self(Repr::Small { buf, len: len as u8 })
         } else {
-            Repr::Large(string.as_bytes().into())
-        })
+            Self(Repr::Large(string.as_bytes().into()))
+        }
     }
 
     /// Whether the string is empty.
@@ -150,23 +152,20 @@ impl EcoString {
                         // We maintain `len < LIMIT` because `get_mut` succeeded.
                         *slot = c as u8;
                         *len += 1;
-                    } else {
-                        debug_assert_eq!(prev, LIMIT);
-                        let mut vec = EcoVec::with_capacity(prev + 1);
-                        vec.extend_from_byte_slice(buf);
-                        vec.push(c as u8);
-                        self.0 = Repr::Large(vec);
+                        return;
                     }
                 }
-                Repr::Large(vec) => vec.push(c as u8),
+                Repr::Large(vec) => {
+                    vec.push(c as u8);
+                    return;
+                }
             }
-        } else {
-            self.push_str(c.encode_utf8(&mut [0; 4]));
         }
+
+        self.push_str(c.encode_utf8(&mut [0; 4]));
     }
 
     /// Append the given string slice at the end.
-    #[inline]
     pub fn push_str(&mut self, string: &str) {
         match &mut self.0 {
             Repr::Small { buf, len } => {
@@ -177,7 +176,8 @@ impl EcoString {
                     segment.copy_from_slice(string.as_bytes());
                     *len = new as u8;
                 } else {
-                    // Safety: See `Self::as_str()`.
+                    // Safety:
+                    // We have the invariant `len < LIMIT`.
                     let existing = unsafe { buf.get_unchecked(..prev) };
                     let mut vec = EcoVec::with_capacity(prev + string.len());
                     vec.extend_from_byte_slice(existing);

@@ -1,6 +1,12 @@
+// Test with `cargo miri test` to check sanity!
+
+use std::sync::atomic::{AtomicUsize, Ordering::*};
+
 use super::*;
 
-fn b<T>(value: T) -> Box<T> {
+const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
+
+fn v<T>(value: T) -> Box<T> {
     Box::new(value)
 }
 
@@ -10,36 +16,124 @@ fn test_vec_macro() {
 }
 
 #[test]
-fn test_vec_aliased() {
+fn test_vec_with_capacity() {
+    let mut vec = EcoVec::with_capacity(3);
+    assert_eq!(vec.capacity(), 3);
+    let ptr = vec.as_ptr();
+    vec.push(1);
+    vec.push(2);
+    vec.push(3);
+    assert_eq!(ptr, vec.as_ptr());
+    vec.push(4);
+    assert_eq!(vec, [1, 2, 3, 4]);
+}
+
+#[test]
+#[should_panic(expected = "capacity overflow")]
+fn test_vec_with_capacity_fail() {
+    EcoVec::<u8>::with_capacity(usize::MAX);
+}
+
+#[test]
+fn test_vec_empty() {
+    let mut first = EcoVec::with_capacity(3);
+    assert!(first.is_empty());
+    assert_eq!(first.len(), 0);
+    first.push("hi".to_string());
+    assert!(!first.is_empty());
+    assert_eq!(first.len(), 1);
+    let second = first.clone();
+    first.clear();
+    assert!(first.is_empty());
+    assert_eq!(second.len(), 1);
+    assert_eq!(second, ["hi".to_string()]);
+}
+
+#[test]
+fn test_vec_make_mut() {
+    let mut first = eco_vec![4, -3, 11, 6, 10];
+    let ptr = first.as_ptr();
+    first.make_mut()[1] -= 1;
+    assert_eq!(ptr, first.as_ptr());
+    let second = first.clone();
+    first.make_mut().sort();
+    assert_eq!(first, [-4, 4, 6, 10, 11]);
+    assert_eq!(second, [4, -4, 11, 6, 10]);
+}
+
+#[test]
+fn test_vec_push() {
     let mut first = EcoVec::new();
     first.push(1);
     first.push(2);
     first.push(3);
     assert_eq!(first.len(), 3);
     let mut second = first.clone();
+    let third = second.clone();
+    let _ = third.clone();
     second.push(4);
     assert_eq!(second.len(), 4);
-    assert_eq!(second, [1, 2, 3, 4]);
     assert_eq!(first, [1, 2, 3]);
+    assert_eq!(second, [1, 2, 3, 4]);
+    assert_eq!(third, [1, 2, 3]);
+    assert_ne!(first.as_ptr(), second.as_ptr());
+    assert_eq!(first.as_ptr(), third.as_ptr());
 }
 
 #[test]
-fn test_vec_into_iter() {
-    let first = eco_vec![b(2), b(4), b(5)];
+fn test_vec_pop() {
+    let mut first = EcoVec::new();
+    assert_eq!(first.pop(), None);
+    first.push(v("a"));
+    let ptr = first.as_ptr();
+    assert_eq!(first.pop(), Some(v("a")));
+    first.push(v("b"));
+    assert_eq!(ptr, first.as_ptr());
+    let second = first.clone();
+    assert_eq!(first[0], v("b"));
+    assert_eq!(ptr, first.as_ptr());
+    assert_eq!(first.pop(), Some(v("b")));
+    assert_eq!(first, []);
+    assert_eq!(second, [v("b")]);
+}
+
+#[test]
+fn test_vec_insert() {
+    let mut first = EcoVec::new();
+    first.insert(0, "okay");
+    let ptr = first.as_ptr();
+    first.insert(0, "reverse");
     let mut second = first.clone();
-    assert_eq!(first.clone().into_iter().count(), 3);
-    assert_eq!(second.clone().into_iter().rev().collect::<Vec<_>>(), [b(5), b(4), b(2)]);
-    second.clear();
-    assert_eq!(second.into_iter().collect::<Vec<_>>(), []);
-    assert_eq!(first.clone().into_iter().collect::<Vec<_>>(), [b(2), b(4), b(5)]);
-    let mut iter = first.into_iter();
-    assert_eq!(iter.next(), Some(b(2)));
-    assert_eq!(iter.as_slice(), [b(4), b(5)]);
-    drop(iter);
+    first.insert(2, "a");
+    first.insert(1, "b");
+    second.insert(2, "last");
+    assert_eq!(first, ["reverse", "b", "okay", "a"]);
+    assert_eq!(second, ["reverse", "okay", "last"]);
+    assert_ne!(ptr, first.as_ptr());
+    assert_eq!(ptr, second.as_ptr());
 }
 
 #[test]
-fn test_vec_mutations() {
+#[should_panic(expected = "index is out bounds (index: 4, len: 0)")]
+fn test_vec_insert_fail() {
+    EcoVec::from([1, 2, 3]).insert(4, 0);
+}
+
+#[test]
+fn test_vec_remove() {
+    let mut first = EcoVec::with_capacity(4);
+    let ptr = first.as_ptr();
+    first.extend_from_slice(&[v(2), v(4), v(1)]);
+    let second = first.clone();
+    assert_eq!(first.remove(1), v(4));
+    assert_eq!(first, [v(2), v(1)]);
+    assert_eq!(second, [v(2), v(4), v(1)]);
+    assert_ne!(ptr, first.as_ptr());
+    assert_eq!(ptr, second.as_ptr());
+}
+
+#[test]
+fn test_vec_more_mutations() {
     let mut vec: EcoVec<&'static str> =
         "hello, world! what's going on?".split_whitespace().collect();
 
@@ -63,13 +157,71 @@ fn test_vec_mutations() {
 }
 
 #[test]
+fn test_vec_truncate() {
+    let mut vec = eco_vec!["ok"; 10];
+    vec.truncate(13);
+    vec.truncate(3);
+    assert_eq!(vec, ["ok"; 3])
+}
+
+#[test]
 fn test_vec_extend() {
     let mut vec = EcoVec::new();
+    vec.extend_from_slice(&[]);
     vec.extend_from_byte_slice(&[2, 3, 4]);
     assert_eq!(vec, [2, 3, 4]);
 }
 
-const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
+#[test]
+fn test_vec_into_iter() {
+    let first = eco_vec![v(2), v(4), v(5)];
+    let mut second = first.clone();
+    assert_eq!(first.clone().into_iter().count(), 3);
+    assert_eq!(second.clone().into_iter().rev().collect::<Vec<_>>(), [v(5), v(4), v(2)]);
+    second.clear();
+    assert_eq!(second.into_iter().collect::<Vec<_>>(), []);
+    assert_eq!(first.clone().into_iter().collect::<Vec<_>>(), [v(2), v(4), v(5)]);
+    let mut iter = first.into_iter();
+    assert_eq!(iter.len(), 3);
+    assert_eq!(iter.next(), Some(v(2)));
+    assert_eq!(iter.next_back(), Some(v(5)));
+    assert_eq!(iter.as_slice(), [v(4)]);
+    drop(iter);
+}
+
+#[test]
+fn test_vec_zst() {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Clone)]
+    struct Potato;
+    impl Drop for Potato {
+        fn drop(&mut self) {
+            COUNTER.fetch_add(1, SeqCst);
+        }
+    }
+
+    let mut vec = EcoVec::new();
+    for _ in 0..1000 {
+        vec.push(Potato);
+    }
+    assert_eq!(vec.len(), 1000);
+    drop(vec);
+
+    assert_eq!(COUNTER.load(SeqCst), 1000);
+}
+
+#[test]
+fn test_vec_huge_alignment() {
+    #[derive(Debug, PartialEq, Clone)]
+    #[repr(align(128))]
+    struct Big([u8; 128]);
+    let mut vec = EcoVec::<Big>::new();
+    assert_eq!(vec.len(), 0);
+    assert_eq!(vec.as_slice(), []);
+    vec.push(Big([1; 128]));
+    assert_eq!(vec.as_slice(), [Big([1; 128])]);
+}
 
 #[test]
 fn test_str_new() {

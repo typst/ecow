@@ -30,10 +30,15 @@ macro_rules! eco_vec {
 
 /// An economical vector with clone-on-write semantics.
 ///
-/// Most mutating methods require `T: Clone` due to clone-on-write semantics.
-///
 /// This type has a size of one word and is null-pointer optimized (meaning that
-/// `Option<EcoVec<T>>` also takes only one word).
+/// [`Option<EcoVec<T>>`] also takes only one word). Within its allocation it
+/// stores a reference count, its length, and its capacity. In contrast to an
+/// [`Arc<Vec<T>>`](std::sync::Arc), this type only requires a single allocation
+/// for both the reference count and the elements. The internal reference
+/// counter is atomic, making this type [`Sync`] and [`Send`].
+///
+/// Note that most mutating methods require [`T: Clone`](Clone) due to
+/// clone-on-write semantics.
 ///
 /// # Example
 /// ```
@@ -248,7 +253,7 @@ impl<T: Clone> EcoVec<T> {
             // Safety:
             // - The pointer returned by `data_mut()` is valid for `capacity`
             //   writes.
-            // - Due to the check above, `len < capacity`.
+            // - Due to the `reserve` call, `len < capacity`.
             // - Thus, `data_mut() + len` is valid for one write.
             ptr::write(self.data_mut().add(len), value);
         }
@@ -356,7 +361,7 @@ impl<T: Clone> EcoVec<T> {
             // - Due to the check above, `index < len`.
             // - Thus, `at` is valid for one read.
             let at = self.data_mut().add(index);
-            let val = ptr::read(at);
+            let value = ptr::read(at);
 
             // Safety:
             // - The pointer returned by `data()` is valid for `len` reads and
@@ -367,7 +372,7 @@ impl<T: Clone> EcoVec<T> {
             //   for `len - index - 1` writes.
             ptr::copy(at.add(1), at, len - index - 1);
 
-            val
+            value
         }
     }
 
@@ -478,19 +483,30 @@ impl<T: Clone> EcoVec<T> {
 
     /// Clones and pushes all elements in a slice to the vector.
     pub fn extend_from_slice(&mut self, slice: &[T]) {
+        if slice.is_empty() {
+            return;
+        }
+
         self.reserve(slice.len());
         let prev = self.len();
 
         // Safety:
         // The reference count is `1` because of `reserve`.
         unsafe {
-            // Safety: See `push`.
             for (i, value) in slice.iter().enumerate() {
+                // Safety:
+                // - The pointer returned by `data_mut()` is valid for
+                //   `capacity` writes.
+                // - Due to the check above, `prev + slice.len() <= capacity`.
+                // - Thus, `data_mut() + prev + i` is valid for one write.
                 ptr::write(self.data_mut().add(prev + i), value.clone());
             }
 
             // Safety:
-            // Only increase after writing all values in case `.clone()` panics.
+            // - The vector has a backing allocation because we reserved space
+            //   for at least one element (slice isn't empty).
+            // - We only increase after writing all values in case `.clone()`
+            //   panics.
             self.header_mut().len += slice.len();
         }
     }
@@ -560,8 +576,9 @@ impl<T> EcoVec<T> {
     /// A reference to the header.
     #[inline]
     fn header(&self) -> &Header {
-        // Safety: The pointer always points to a valid header, even if the
-        // vector is empty.
+        // Safety:
+        // The pointer always points to a valid header, even if the vector is
+        // empty.
         unsafe { self.ptr.as_ref() }
     }
 
@@ -687,19 +704,19 @@ impl<T: Clone> EcoVec<T> {
     where
         I: IntoIterator<Item = T>,
     {
+        if count == 0 {
+            return;
+        }
+
         self.reserve(count);
         let prev = self.len();
 
-        // Safety:
-        // The reference count is `1` because of `reserve`.
+        // Safety: See `extend_from_slice`.
         unsafe {
-            // Safety: See `push`.
             for (i, value) in iter.into_iter().enumerate() {
                 ptr::write(self.data_mut().add(prev + i), value);
             }
 
-            // Safety:
-            // Only increase after writing all values in case `.clone()` panics.
             self.header_mut().len += prev;
         }
     }
@@ -718,10 +735,13 @@ impl EcoVec<u8> {
     /// Copies from a byte slice.
     #[inline]
     pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+
         self.reserve(bytes.len());
 
-        // Safety:
-        // The reference count is `1` because of `reserve`.
+        // Safety: See `extend_from_slice`.
         unsafe {
             // Safety:
             // - The source slice is valid for `bytes.len()` reads.
@@ -735,7 +755,6 @@ impl EcoVec<u8> {
                 bytes.len(),
             );
 
-            // Safety: See `push`.
             self.header_mut().len += bytes.len();
         }
     }
@@ -870,10 +889,24 @@ impl<T: PartialEq> PartialEq<[T]> for EcoVec<T> {
     }
 }
 
+impl<T: PartialEq> PartialEq<&[T]> for EcoVec<T> {
+    #[inline]
+    fn eq(&self, other: &&[T]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
 impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for EcoVec<T> {
     #[inline]
     fn eq(&self, other: &[T; N]) -> bool {
         self.as_slice() == other
+    }
+}
+
+impl<T: PartialEq, const N: usize> PartialEq<&[T; N]> for EcoVec<T> {
+    #[inline]
+    fn eq(&self, other: &&[T; N]) -> bool {
+        self.as_slice() == *other
     }
 }
 
@@ -927,12 +960,23 @@ impl<T: Clone> From<&[T]> for EcoVec<T> {
     }
 }
 
+impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
+    fn from(array: [T; N]) -> Self {
+        let mut vec = Self::new();
+        unsafe {
+            // Safety: Array's IntoIter implements `TrustedLen`.
+            vec.extend_from_trusted(array.len(), array.into_iter());
+        }
+        vec
+    }
+}
+
 impl<T: Clone> From<Vec<T>> for EcoVec<T> {
     /// This needs to allocate to change the layout.
     fn from(other: Vec<T>) -> Self {
         let mut vec = Self::new();
         unsafe {
-            // Safety: Vec implements `TrustedLen`.
+            // Safety: Vec's IntoIter implements `TrustedLen`.
             vec.extend_from_trusted(other.len(), other.into_iter());
         }
         vec
