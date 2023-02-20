@@ -1,13 +1,15 @@
-use std::alloc::{self, Layout};
-use std::borrow::Borrow;
-use std::cmp::{self, Ordering};
-use std::fmt::{self, Debug, Formatter};
-use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
-use std::mem;
-use std::ops::Deref;
-use std::ptr::{self, NonNull};
-use std::sync::atomic::{self, AtomicUsize, Ordering::*};
+use core::alloc::Layout;
+use core::borrow::Borrow;
+use core::cmp::{self, Ordering};
+use core::fmt::{self, Debug, Formatter};
+use core::hash::{Hash, Hasher};
+use core::marker::PhantomData;
+use core::mem;
+use core::ops::Deref;
+use core::ptr::{self, NonNull};
+use core::sync::atomic::{self, AtomicUsize, Ordering::*};
+
+use alloc::vec::Vec;
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
@@ -174,7 +176,7 @@ impl<T> EcoVec<T> {
         //   are other vectors referencing the same backing allocation, they are
         //   now allowed to mutate the slice since the ref-count would be larger
         //   than one.
-        unsafe { std::slice::from_raw_parts(self.data(), self.len()) }
+        unsafe { core::slice::from_raw_parts(self.data(), self.len()) }
     }
 
     /// Removes all values from the vector.
@@ -527,7 +529,7 @@ impl<T> EcoVec<T> {
         }
 
         // Directly go to maximum capacity for ZSTs.
-        if std::mem::size_of::<T>() == 0 {
+        if core::mem::size_of::<T>() == 0 {
             target = isize::MAX as usize;
         }
 
@@ -536,7 +538,7 @@ impl<T> EcoVec<T> {
         let ptr = if !self.is_allocated() {
             // Safety:
             // The layout has non-zero size because `target > 0`.
-            alloc::alloc(layout)
+            alloc::alloc::alloc(layout)
         } else {
             // Safety:
             // - `self.ptr` was allocated before (just checked)
@@ -544,7 +546,7 @@ impl<T> EcoVec<T> {
             // - `Self::size()` guarantees to return a value that is `> 0`
             //   and rounded up to the nearest multiple of `Self::align()`
             //   does not overflow `isize::MAX`.
-            alloc::realloc(
+            alloc::alloc::realloc(
                 self.ptr.as_ptr() as *mut u8,
                 Self::layout(self.capacity()),
                 Self::size(target),
@@ -553,7 +555,7 @@ impl<T> EcoVec<T> {
 
         // If non-null the pointer points to a valid allocation.
         self.ptr = NonNull::new(ptr as *mut Header)
-            .unwrap_or_else(|| alloc::handle_alloc_error(layout));
+            .unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
 
         // Safety:
         // The freshly allocated pointer is valid for a write of the header.
@@ -570,7 +572,7 @@ impl<T> EcoVec<T> {
     #[inline]
     unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [T] {
         // Safety: See `Self::as_slice()`.
-        std::slice::from_raw_parts_mut(self.data_mut(), self.len())
+        core::slice::from_raw_parts_mut(self.data_mut(), self.len())
     }
 
     /// A reference to the header.
@@ -786,10 +788,10 @@ impl<T: Clone> Clone for EcoVec<T> {
     fn clone(&self) -> Self {
         // If the vector has a backing allocation, bump the ref-count.
         if self.is_allocated() {
-            // See Arc's clone impl for details about ordering and aborting.
+            // See Arc's clone impl for details about memory ordering.
             let prev = self.header().refs.fetch_add(1, Relaxed);
             if prev > isize::MAX as usize {
-                std::process::abort();
+                ref_count_overflow();
             }
         }
 
@@ -824,7 +826,10 @@ impl<T> Drop for EcoVec<T> {
             // Safety:
             // The vector isn't empty, so `self.ptr` points to an allocation
             // with the layout of current capacity.
-            alloc::dealloc(self.ptr.as_ptr() as *mut u8, Self::layout(self.capacity()));
+            alloc::alloc::dealloc(
+                self.ptr.as_ptr() as *mut u8,
+                Self::layout(self.capacity()),
+            );
         }
     }
 }
@@ -1010,7 +1015,7 @@ impl<T: Clone> Extend<T> for EcoVec<T> {
 }
 
 impl<'a, T> IntoIterator for &'a EcoVec<T> {
-    type IntoIter = std::slice::Iter<'a, T>;
+    type IntoIter = core::slice::Iter<'a, T>;
     type Item = &'a T;
 
     #[inline]
@@ -1065,7 +1070,7 @@ impl<T> IntoIter<T> {
             // - Since `front <= back <= len`, `data() + front` is valid for
             //   `back - front` reads.
             // - For more details, see `EcoVec::as_slice`.
-            std::slice::from_raw_parts(
+            core::slice::from_raw_parts(
                 self.vec.data().add(self.front),
                 self.back - self.front,
             )
@@ -1170,6 +1175,11 @@ impl<T: Debug> Debug for IntoIter<T> {
 #[cold]
 fn capacity_overflow() -> ! {
     panic!("capacity overflow");
+}
+
+#[cold]
+fn ref_count_overflow() -> ! {
+    panic!("reference count overflow");
 }
 
 #[cold]

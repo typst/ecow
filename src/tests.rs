@@ -1,6 +1,10 @@
-// Test with `cargo miri test` to check sanity!
+// Test with `cargo +nightly miri test` to check sanity!
 
-use std::sync::atomic::{AtomicUsize, Ordering::*};
+use core::sync::atomic::{AtomicUsize, Ordering::*};
+
+use alloc::boxed::Box;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 
 use super::*;
 
@@ -12,7 +16,7 @@ fn v<T>(value: T) -> Box<T> {
 
 #[test]
 fn test_vec_macro() {
-    assert_eq!(eco_vec![Box::new(1); 3], vec![Box::new(1); 3]);
+    assert_eq!(eco_vec![Box::new(1); 3], alloc::vec![v(1); 3]);
 }
 
 #[test]

@@ -1,8 +1,11 @@
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::fmt::{self, Debug, Display, Formatter, Write};
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, AddAssign, Deref};
+use core::borrow::Borrow;
+use core::cmp::Ordering;
+use core::fmt::{self, Debug, Display, Formatter, Write};
+use core::hash::{Hash, Hasher};
+use core::ops::{Add, AddAssign, Deref};
+
+use alloc::borrow::Cow;
+use alloc::string::String;
 
 use super::EcoVec;
 
@@ -138,7 +141,7 @@ impl EcoString {
         // - Valid ASCII characters
         // - Other string slices
         // - Chars that were encoded with char::encode_utf8
-        unsafe { std::str::from_utf8_unchecked(buf) }
+        unsafe { core::str::from_utf8_unchecked(buf) }
     }
 
     /// Append the given character at the end.
@@ -478,6 +481,13 @@ impl From<String> for EcoString {
     }
 }
 
+impl From<Cow<'_, str>> for EcoString {
+    #[inline]
+    fn from(s: Cow<str>) -> Self {
+        Self::from_str_like(s)
+    }
+}
+
 impl FromIterator<char> for EcoString {
     #[inline]
     fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
@@ -513,13 +523,13 @@ impl From<EcoString> for String {
     /// This needs to allocate to change the layout.
     #[inline]
     fn from(s: EcoString) -> Self {
-        s.as_str().to_owned()
+        s.as_str().into()
     }
 }
 
 impl From<&EcoString> for String {
     #[inline]
     fn from(s: &EcoString) -> Self {
-        s.as_str().to_owned()
+        s.as_str().into()
     }
 }

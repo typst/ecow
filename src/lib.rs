@@ -39,7 +39,10 @@ assert_eq!(third, "Welcome to earth! ");
 [arc]: std::sync::Arc
 */
 
+#![no_std]
 #![deny(missing_docs)]
+
+extern crate alloc;
 
 mod string;
 mod vec;
