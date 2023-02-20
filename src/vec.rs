@@ -43,12 +43,14 @@ macro_rules! eco_vec {
 /// let mut first = EcoVec::new();
 /// first.push(1);
 /// first.push(2);
+/// assert_eq!(first, [1, 2]);
 ///
 /// // This clone is cheap, it references the same allocation.
 /// let mut second = first.clone();
 ///
 /// // This makes a real copy (clone-on-write).
 /// second.push(3);
+/// assert_eq!(second, [1, 2, 3]);
 ///
 /// // As `second` was cloned upon mutation, this iterator can
 /// // move the elements. If the allocation was still shared with
@@ -380,6 +382,8 @@ impl<T: Clone> EcoVec<T> {
     where
         F: FnMut(&mut T) -> bool,
     {
+        // Modified from: https://github.com/servo/rust-smallvec
+        // Copyright (c) 2018 The Servo Project Developers
         let len = self.len();
         let values = self.make_mut();
 

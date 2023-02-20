@@ -37,13 +37,15 @@ macro_rules! format_eco {
 /// // This spills to the heap only once: `big` and `third` share the same
 /// // underlying allocation. Just like vectors, heap strings are only really
 /// // cloned upon mutation.
-/// let big = small + " to planet earth! 🌱";
+/// let big = small + " to earth! 🌱";
 /// let mut third = big.clone();
-/// assert_eq!(third, "Welcome to planet earth! 🌱");
+/// assert_eq!(big, "Welcome to earth! 🌱");
+/// assert_eq!(third, big);
 ///
 /// // This allocates again to mutate `third` without affecting `big`.
 /// assert_eq!(third.pop(), Some('🌱'));
-/// assert_eq!(big, "Welcome to planet earth! 🌱");
+/// assert_eq!(third, "Welcome to earth! ");
+/// assert_eq!(big, "Welcome to earth! 🌱");
 /// ```
 #[derive(Clone)]
 pub struct EcoString(Repr);
