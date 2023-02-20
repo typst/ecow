@@ -72,11 +72,13 @@ pub(crate) const LIMIT: usize = 14;
 
 impl EcoString {
     /// Create a new, empty string.
+    #[inline]
     pub const fn new() -> Self {
         Self(Repr::Small { buf: [0; LIMIT], len: 0 })
     }
 
     /// Create a new, empty string with the given `capacity`.
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity <= LIMIT {
             Self::new()
@@ -86,6 +88,7 @@ impl EcoString {
     }
 
     /// Create an instance from an existing string-like type.
+    #[inline]
     fn from_str_like(string: impl AsRef<str>) -> Self {
         let string = string.as_ref();
         let len = string.len();
@@ -100,11 +103,13 @@ impl EcoString {
     }
 
     /// Whether the string is empty.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// The length of the string in bytes.
+    #[inline]
     pub fn len(&self) -> usize {
         match &self.0 {
             Repr::Small { len, .. } => usize::from(*len),
@@ -113,6 +118,7 @@ impl EcoString {
     }
 
     /// A string slice containing the entire string.
+    #[inline]
     pub fn as_str(&self) -> &str {
         let buf = match &self.0 {
             Repr::Small { buf, len } => {
@@ -132,6 +138,7 @@ impl EcoString {
     }
 
     /// Append the given character at the end.
+    #[inline]
     pub fn push(&mut self, c: char) {
         if c.len_utf8() == 1 {
             match &mut self.0 {
@@ -157,6 +164,7 @@ impl EcoString {
     }
 
     /// Append the given string slice at the end.
+    #[inline]
     pub fn push_str(&mut self, string: &str) {
         match &mut self.0 {
             Repr::Small { buf, len } => {
@@ -180,20 +188,20 @@ impl EcoString {
     }
 
     /// Remove the last character from the string.
+    #[inline]
     pub fn pop(&mut self) -> Option<char> {
-        let c = self.as_str().chars().rev().next()?;
-        let len_utf8 = c.len_utf8();
-
-        // Will not underflow because the char was decoded from the buffer.
+        let slice = self.as_str();
+        let c = slice.chars().rev().next()?;
+        let shrunk = slice.len() - c.len_utf8();
         match &mut self.0 {
-            Repr::Small { len, .. } => *len -= len_utf8 as u8,
-            Repr::Large(vec) => vec.truncate(vec.len() - len_utf8),
+            Repr::Small { len, .. } => *len = shrunk as u8,
+            Repr::Large(vec) => vec.truncate(shrunk),
         }
-
         Some(c)
     }
 
     /// Clear the string.
+    #[inline]
     pub fn clear(&mut self) {
         match &mut self.0 {
             Repr::Small { len, .. } => *len = 0,
@@ -281,24 +289,28 @@ impl EcoString {
 impl Deref for EcoString {
     type Target = str;
 
+    #[inline]
     fn deref(&self) -> &str {
         self.as_str()
     }
 }
 
 impl Default for EcoString {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl Debug for EcoString {
+    #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Debug::fmt(self.as_str(), f)
     }
 }
 
 impl Display for EcoString {
+    #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Display::fmt(self.as_str(), f)
     }
@@ -307,71 +319,83 @@ impl Display for EcoString {
 impl Eq for EcoString {}
 
 impl PartialEq for EcoString {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_str().eq(other.as_str())
     }
 }
 
 impl PartialEq<str> for EcoString {
+    #[inline]
     fn eq(&self, other: &str) -> bool {
         self.as_str().eq(other)
     }
 }
 
 impl PartialEq<&str> for EcoString {
+    #[inline]
     fn eq(&self, other: &&str) -> bool {
         self.as_str().eq(*other)
     }
 }
 
 impl PartialEq<String> for EcoString {
+    #[inline]
     fn eq(&self, other: &String) -> bool {
         self.as_str().eq(other)
     }
 }
 
 impl PartialEq<EcoString> for str {
+    #[inline]
     fn eq(&self, other: &EcoString) -> bool {
         self.eq(other.as_str())
     }
 }
 
 impl PartialEq<EcoString> for &str {
+    #[inline]
     fn eq(&self, other: &EcoString) -> bool {
         (*self).eq(other.as_str())
     }
 }
 
 impl PartialEq<EcoString> for String {
+    #[inline]
     fn eq(&self, other: &EcoString) -> bool {
         self.eq(other.as_str())
     }
 }
 
 impl Ord for EcoString {
+    #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.as_str().cmp(other.as_str())
     }
 }
 
 impl PartialOrd for EcoString {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_str().partial_cmp(other.as_str())
     }
 }
 
 impl Hash for EcoString {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
     }
 }
 
 impl Write for EcoString {
+    #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.push_str(s);
         Ok(())
     }
 
+    #[inline]
     fn write_char(&mut self, c: char) -> fmt::Result {
         self.push(c);
         Ok(())
@@ -381,6 +405,7 @@ impl Write for EcoString {
 impl Add for EcoString {
     type Output = Self;
 
+    #[inline]
     fn add(mut self, rhs: Self) -> Self::Output {
         self += rhs;
         self
@@ -388,6 +413,7 @@ impl Add for EcoString {
 }
 
 impl AddAssign for EcoString {
+    #[inline]
     fn add_assign(&mut self, rhs: Self) {
         self.push_str(rhs.as_str());
     }
@@ -396,6 +422,7 @@ impl AddAssign for EcoString {
 impl Add<&str> for EcoString {
     type Output = Self;
 
+    #[inline]
     fn add(mut self, rhs: &str) -> Self::Output {
         self += rhs;
         self
@@ -403,24 +430,28 @@ impl Add<&str> for EcoString {
 }
 
 impl AddAssign<&str> for EcoString {
+    #[inline]
     fn add_assign(&mut self, rhs: &str) {
         self.push_str(rhs);
     }
 }
 
 impl AsRef<str> for EcoString {
+    #[inline]
     fn as_ref(&self) -> &str {
         self
     }
 }
 
 impl Borrow<str> for EcoString {
+    #[inline]
     fn borrow(&self) -> &str {
         self
     }
 }
 
 impl From<char> for EcoString {
+    #[inline]
     fn from(c: char) -> Self {
         // We maintain `len < LIMIT` because `LIMIT >= 4`.
         let mut buf = [0; LIMIT];
@@ -430,6 +461,7 @@ impl From<char> for EcoString {
 }
 
 impl From<&str> for EcoString {
+    #[inline]
     fn from(s: &str) -> Self {
         Self::from_str_like(s)
     }
@@ -438,12 +470,14 @@ impl From<&str> for EcoString {
 impl From<String> for EcoString {
     /// When the string does not fit inline, this needs to allocate to change
     /// the layout.
+    #[inline]
     fn from(s: String) -> Self {
         Self::from_str_like(s)
     }
 }
 
 impl FromIterator<char> for EcoString {
+    #[inline]
     fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
         let mut s = Self::new();
         for c in iter {
@@ -454,6 +488,7 @@ impl FromIterator<char> for EcoString {
 }
 
 impl FromIterator<Self> for EcoString {
+    #[inline]
     fn from_iter<T: IntoIterator<Item = Self>>(iter: T) -> Self {
         let mut s = Self::new();
         for piece in iter {
@@ -464,6 +499,7 @@ impl FromIterator<Self> for EcoString {
 }
 
 impl Extend<char> for EcoString {
+    #[inline]
     fn extend<T: IntoIterator<Item = char>>(&mut self, iter: T) {
         for c in iter {
             self.push(c);
@@ -473,12 +509,14 @@ impl Extend<char> for EcoString {
 
 impl From<EcoString> for String {
     /// This needs to allocate to change the layout.
+    #[inline]
     fn from(s: EcoString) -> Self {
         s.as_str().to_owned()
     }
 }
 
 impl From<&EcoString> for String {
+    #[inline]
     fn from(s: &EcoString) -> Self {
         s.as_str().to_owned()
     }

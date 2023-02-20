@@ -104,6 +104,7 @@ static EMPTY: Header = Header { refs: AtomicUsize::new(1), len: 0, capacity: 0 }
 
 impl<T> EcoVec<T> {
     /// Create a new, empty vector.
+    #[inline]
     pub fn new() -> Self {
         Self {
             // Safety:
@@ -118,6 +119,7 @@ impl<T> EcoVec<T> {
     }
 
     /// Create a new, empty vec with at least the specified capacity.
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let mut vec = Self::new();
         if capacity > 0 {
@@ -133,11 +135,13 @@ impl<T> EcoVec<T> {
     }
 
     /// Returns `true` if the vector contains no elements.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// The number of elements in the vector.
+    #[inline]
     pub fn len(&self) -> usize {
         self.header().len
     }
@@ -146,11 +150,13 @@ impl<T> EcoVec<T> {
     ///
     /// Even if `len < capacity`, pushing into the vector may still
     /// allocate if the reference count is larger than one.
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.header().capacity
     }
 
     /// Extracts a slice containing the entire vector.
+    #[inline]
     pub fn as_slice(&self) -> &[T] {
         // Safety:
         // - The pointer returned by `data()` is non-null, well-aligned, and
@@ -222,6 +228,7 @@ impl<T: Clone> EcoVec<T> {
     /// Add a value at the end of the vector.
     ///
     /// Clones the vector if its reference count is larger than 1.
+    #[inline]
     pub fn push(&mut self, value: T) {
         // Ensure unique ownership and grow the vector if necessary.
         let len = self.len();
@@ -249,6 +256,7 @@ impl<T: Clone> EcoVec<T> {
     /// vector is empty.
     ///
     /// Clones the vector if its reference count is larger than 1.
+    #[inline]
     pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
             return None;
@@ -540,6 +548,7 @@ impl<T> EcoVec<T> {
     /// the reference count.
     ///
     /// May only be called if the reference count is `1`.
+    #[inline]
     unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [T] {
         // Safety: See `Self::as_slice()`.
         debug_assert!(!self.is_shared());
@@ -547,6 +556,7 @@ impl<T> EcoVec<T> {
     }
 
     /// A reference to the header.
+    #[inline]
     fn header(&self) -> &Header {
         // Safety: The pointer always points to a valid header, even if the
         // vector is empty.
@@ -558,6 +568,7 @@ impl<T> EcoVec<T> {
     /// May only be called if:
     /// - the reference count is `1`, and
     /// - `is_allocated` or `!is_empty`
+    #[inline]
     unsafe fn header_mut(&mut self) -> &mut Header {
         // Safety: The pointer always points to a valid header.
         debug_assert!(self.is_allocated());
@@ -565,11 +576,13 @@ impl<T> EcoVec<T> {
     }
 
     /// Whether this vector has a backing allocation.
+    #[inline]
     fn is_allocated(&self) -> bool {
         self.ptr.as_ptr() as *const Header != &EMPTY as *const Header
     }
 
     /// Whether another instance is pointing to the same backing allocation.
+    #[inline]
     fn is_shared(&self) -> bool {
         self.header().refs.load(Relaxed) > 1
     }
@@ -578,6 +591,7 @@ impl<T> EcoVec<T> {
     ///
     /// Returns a pointer that is non-null, well-aligned, and valid for `len`
     /// reads of `T`.
+    #[inline]
     fn data(&self) -> *const T {
         // When `T` has bigger alignment than the header, the `ptr` may not be
         // well-aligned. However, then `len` is guaranteed to be `0`, so we can
@@ -599,6 +613,7 @@ impl<T> EcoVec<T> {
     ///
     /// Returns a pointer that is non-null, well-aligned, and valid for
     /// `capacity` writes of `T`.
+    #[inline]
     fn data_mut(&mut self) -> *mut T {
         // See the explanation above.
         if mem::align_of::<T>() > mem::align_of::<Header>() && !self.is_allocated() {
@@ -615,6 +630,7 @@ impl<T> EcoVec<T> {
     }
 
     /// The layout of a backing allocation for the given capacity.
+    #[inline]
     fn layout(capacity: usize) -> Layout {
         // Safety:
         // - `Self::size(capacity)` guarantees that it rounded up the alignment
@@ -628,6 +644,7 @@ impl<T> EcoVec<T> {
     ///
     /// Always `> 0`. When rounded up to the next multiple of `Self::align()` is
     /// guaranteed to be `<= isize::MAX`.
+    #[inline]
     fn size(capacity: usize) -> usize {
         mem::size_of::<T>()
             .checked_mul(capacity)
@@ -640,16 +657,19 @@ impl<T> EcoVec<T> {
     }
 
     /// The alignment of the backing allocation.
+    #[inline]
     fn align() -> usize {
         cmp::max(mem::align_of::<Header>(), mem::align_of::<T>())
     }
 
     /// The offset of the data in the backing allocation.
+    #[inline]
     fn offset() -> usize {
         cmp::max(mem::size_of::<Header>(), Self::align())
     }
 
     /// The minimum non-zero capacity.
+    #[inline]
     fn min_cap() -> usize {
         // In the spirit of the `EcoVec`, we choose the cutoff size of T from
         // which 1 is the minimum capacity a bit lower than a standard `Vec`.
@@ -700,6 +720,7 @@ impl<T: Clone> EcoVec<T> {
 
 impl EcoVec<u8> {
     /// Copies from a byte slice.
+    #[inline]
     pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
         self.reserve(bytes.len());
 
@@ -759,36 +780,42 @@ impl<T> Drop for EcoVec<T> {
 impl<T> Deref for EcoVec<T> {
     type Target = [T];
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.as_slice()
     }
 }
 
 impl<T> Borrow<[T]> for EcoVec<T> {
+    #[inline]
     fn borrow(&self) -> &[T] {
         self.as_slice()
     }
 }
 
 impl<T> AsRef<[T]> for EcoVec<T> {
+    #[inline]
     fn as_ref(&self) -> &[T] {
         self.as_slice()
     }
 }
 
 impl<T> Default for EcoVec<T> {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl<T: Debug> Debug for EcoVec<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.as_slice().fmt(f)
     }
 }
 
 impl<T: Clone> Clone for EcoVec<T> {
+    #[inline]
     fn clone(&self) -> Self {
         // If the vector has a backing allocation, bump the ref-count.
         if self.is_allocated() {
@@ -804,6 +831,7 @@ impl<T: Clone> Clone for EcoVec<T> {
 }
 
 impl<T: Hash> Hash for EcoVec<T> {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_slice().hash(state);
     }
@@ -812,54 +840,63 @@ impl<T: Hash> Hash for EcoVec<T> {
 impl<T: Eq> Eq for EcoVec<T> {}
 
 impl<T: PartialEq> PartialEq for EcoVec<T> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_slice() == other.as_slice()
     }
 }
 
 impl<T: PartialEq> PartialEq<[T]> for EcoVec<T> {
+    #[inline]
     fn eq(&self, other: &[T]) -> bool {
         self.as_slice() == other
     }
 }
 
 impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for EcoVec<T> {
+    #[inline]
     fn eq(&self, other: &[T; N]) -> bool {
         self.as_slice() == other
     }
 }
 
 impl<T: PartialEq> PartialEq<Vec<T>> for EcoVec<T> {
+    #[inline]
     fn eq(&self, other: &Vec<T>) -> bool {
         self.as_slice() == other
     }
 }
 
 impl<T: PartialEq> PartialEq<EcoVec<T>> for [T] {
+    #[inline]
     fn eq(&self, other: &EcoVec<T>) -> bool {
         self == other.as_slice()
     }
 }
 
 impl<T: PartialEq, const N: usize> PartialEq<EcoVec<T>> for [T; N] {
+    #[inline]
     fn eq(&self, other: &EcoVec<T>) -> bool {
         self == other.as_slice()
     }
 }
 
 impl<T: PartialEq> PartialEq<EcoVec<T>> for Vec<T> {
+    #[inline]
     fn eq(&self, other: &EcoVec<T>) -> bool {
         self == other.as_slice()
     }
 }
 
 impl<T: Ord> Ord for EcoVec<T> {
+    #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.as_slice().cmp(&other.as_slice())
     }
 }
 
 impl<T: PartialOrd> PartialOrd for EcoVec<T> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_slice().partial_cmp(&other.as_slice())
     }
@@ -915,6 +952,7 @@ impl<'a, T> IntoIterator for &'a EcoVec<T> {
     type IntoIter = std::slice::Iter<'a, T>;
     type Item = &'a T;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.as_slice().iter()
     }
@@ -924,6 +962,7 @@ impl<T: Clone> IntoIterator for EcoVec<T> {
     type IntoIter = IntoIter<T>;
     type Item = T;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
             unique: !self.is_shared(),
@@ -957,6 +996,7 @@ pub struct IntoIter<T> {
 
 impl<T> IntoIter<T> {
     /// Returns the remaining items of this iterator as a slice.
+    #[inline]
     pub fn as_slice(&self) -> &[T] {
         unsafe {
             // Safety:
@@ -975,6 +1015,7 @@ impl<T> IntoIter<T> {
 impl<T: Clone> Iterator for IntoIter<T> {
     type Item = T;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         (self.front < self.back).then(|| {
             let prev = self.front;
@@ -995,17 +1036,20 @@ impl<T: Clone> Iterator for IntoIter<T> {
         })
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.back - self.front;
         (len, Some(len))
     }
 
+    #[inline]
     fn count(self) -> usize {
         self.len()
     }
 }
 
 impl<T: Clone> DoubleEndedIterator for IntoIter<T> {
+    #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         (self.back > self.front).then(|| {
             self.back -= 1;
@@ -1056,6 +1100,7 @@ impl<T> Drop for IntoIter<T> {
 }
 
 impl<T: Debug> Debug for IntoIter<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_tuple("IntoIter").field(&self.as_slice()).finish()
     }
