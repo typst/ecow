@@ -197,13 +197,9 @@ impl<T: Clone> EcoVec<T> {
     ///
     /// Clones the vector if its reference count is larger than 1.
     pub fn push(&mut self, value: T) {
-        // Grow the vector if necessary and ensure unique ownership.
+        // Ensure unique ownership and grow the vector if necessary.
         let len = self.len();
-        if len == self.capacity() {
-            self.reserve(1);
-        } else {
-            self.make_unique();
-        }
+        self.reserve((len == self.capacity()) as usize);
 
         // Safety:
         // The reference count is `1` because either `reserve` or `make_unique`
@@ -265,12 +261,8 @@ impl<T: Clone> EcoVec<T> {
             out_of_bounds(index, len);
         }
 
-        // Grow the vector if necessary and ensure unique ownership.
-        if len == self.capacity() {
-            self.reserve(1);
-        } else {
-            self.make_unique();
-        }
+        // Ensure unique ownership and grow the vector if necessary.
+        self.reserve((len == self.capacity()) as usize);
 
         // Safety:
         // The reference count is `1` because either `reserve` or `make_unique`
@@ -345,70 +337,6 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Shortens the vector, keeping the first len elements and dropping the
-    /// rest.
-    ///
-    /// Clones the vector if its reference count is larger than 1 and
-    /// `target < len`.
-    pub fn truncate(&mut self, target: usize) {
-        let len = self.len();
-        if target >= len {
-            return;
-        }
-
-        self.make_unique();
-
-        // Safety:
-        // The reference count is `1` because of `make_unique`.
-        unsafe {
-            // Safety:
-            // - The vector has a backing allocation because `target < len`
-            //   and thus `len > 0`.
-            // - Since `target < len`, we maintain `len < capacity`.
-            self.header_mut().len = target;
-
-            // Safety:
-            // - The pointer returned by `data_mut()` is valid for `capacity`
-            //   writes.
-            // - We have the invariant `len <= capacity`.
-            // - Thus, `data_mut() + target` is valid for `len - target` writes.
-            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
-                self.data_mut().add(target),
-                len - target,
-            ));
-        }
-    }
-
-    /// Reserve space for at least `additional` more elements.
-    ///
-    /// Rellocates if the the current capacity isn't sufficient or if the
-    /// vector's reference count is larger than 1.
-    pub fn reserve(&mut self, additional: usize) {
-        self.make_unique();
-
-        let len = self.len();
-        let capacity = self.capacity();
-        if additional > capacity - len {
-            // Reserve at least the `additional` capacity, but also at least
-            // double the capacity to ensure exponential growth and finally
-            // jump directly to a minimum capacity to prevent frequent
-            // reallocation for small vectors.
-            let target = len
-                .checked_add(additional)
-                .unwrap_or_else(|| capacity_overflow())
-                .max(2 * capacity)
-                .max(Self::min_cap());
-
-            unsafe {
-                // Safety:
-                // - The reference count is `1` because of `make_unique`.
-                // - The `target` capacity is greater than the current capacity
-                //   because `additional > 0`.
-                self.grow(target);
-            }
-        }
-    }
-
     /// Retains only the elements specified by the predicate.
     ///
     /// Clones the vector if its reference count is larger than 1.
@@ -434,6 +362,91 @@ impl<T: Clone> EcoVec<T> {
 
         if del > 0 {
             self.truncate(len - del);
+        }
+    }
+
+    /// Shortens the vector, keeping the first len elements and dropping the
+    /// rest.
+    ///
+    /// Clones the vector if its reference count is larger than 1 and
+    /// `target < len`.
+    pub fn truncate(&mut self, target: usize) {
+        let len = self.len();
+        if target >= len {
+            return;
+        }
+
+        if self.is_shared() {
+            // Safety: Just checked bounds.
+            *self = unsafe { self.get_unchecked(..target) }.iter().cloned().collect();
+            return;
+        }
+
+        // Safety:
+        // The reference count is `1` because of `make_unique`.
+        unsafe {
+            // Safety:
+            // - The vector has a backing allocation because `target < len`
+            //   and thus `len > 0`.
+            // - Since `target < len`, we maintain `len < capacity`.
+            self.header_mut().len = target;
+
+            // Safety:
+            // - The pointer returned by `data_mut()` is valid for `capacity`
+            //   writes.
+            // - We have the invariant `len <= capacity`.
+            // - Thus, `data_mut() + target` is valid for `len - target` writes.
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                self.data_mut().add(target),
+                len - target,
+            ));
+        }
+    }
+
+    /// Reserve space for at least `additional` more elements.
+    ///
+    /// Guarantees that the resulting vector has reference count `1` and space
+    /// for `additional` more elements.
+    pub fn reserve(&mut self, additional: usize) {
+        let shared = self.is_shared();
+        let len = self.len();
+        let capacity = self.capacity();
+
+        let mut target = capacity;
+        if additional > capacity - len {
+            // Reserve at least the `additional` capacity, but also at least
+            // double the capacity to ensure exponential growth and finally
+            // jump directly to a minimum capacity to prevent frequent
+            // reallocation for small vectors.
+            target = len
+                .checked_add(additional)
+                .unwrap_or_else(|| capacity_overflow())
+                .max(2 * capacity)
+                .max(Self::min_cap());
+        }
+
+        if shared {
+            let mut vec = Self::with_capacity(target);
+            vec.extend(self.iter().cloned());
+            *self = vec;
+        } else if target > capacity {
+            unsafe {
+                // Safety:
+                // - The reference count is `1` because of `make_unique`.
+                // - The `target` capacity is greater than the current capacity
+                //   because `additional > 0`.
+                self.grow(target);
+                return;
+            }
+        }
+    }
+
+    /// Ensure that this vector has a unique backing allocation.
+    ///
+    /// May change the capacity.
+    fn make_unique(&mut self) {
+        if self.is_shared() {
+            *self = self.iter().cloned().collect();
         }
     }
 }
@@ -612,15 +625,6 @@ impl<T> EcoVec<T> {
             4
         } else {
             1
-        }
-    }
-}
-
-impl<T: Clone> EcoVec<T> {
-    /// Ensure that this vector has a unique backing allocation.
-    fn make_unique(&mut self) {
-        if self.is_shared() {
-            *self = self.iter().cloned().collect();
         }
     }
 }
