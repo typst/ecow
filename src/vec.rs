@@ -129,7 +129,7 @@ impl<T> EcoVec<T> {
         // Safety:
         // - The pointer returned by `data()` is non-null, well-aligned, and
         //   valid for `len` reads of `T`.
-        // - We have the invariants `len <= capacity <= isize::MAX`.
+        // - We have the invariant `len <= capacity <= isize::MAX`.
         // - The memory referenced by the slice isn't mutated for the returned
         //   slice's lifetime, because `self` becomes borrowed and even if there
         //   are other vectors referencing the same backing allocation, they are
@@ -184,7 +184,7 @@ impl<T: Clone> EcoVec<T> {
     ///
     /// Clones the vector if its reference count is larger than 1.
     pub fn make_mut(&mut self) -> &mut [T] {
-        // To provide mutable access, we must have unique ownership of the
+        // To provide mutable access, we must have unique ownership over the
         // backing allocation.
         self.make_unique();
 
@@ -494,6 +494,7 @@ impl<T> EcoVec<T> {
     ///
     /// May only be called if the reference count is `1`.
     unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [T] {
+        // Safety: See `Self::as_slice()`.
         debug_assert!(!self.is_shared());
         std::slice::from_raw_parts_mut(self.data_mut(), self.len())
     }
@@ -642,13 +643,15 @@ impl<T> Drop for EcoVec<T> {
         }
 
         unsafe {
-            // Safety: No other vector references the backing allocation
-            // (just checked) and given that, `as_mut_slice_unchecked` returns
-            // a valid slice of initialized values.
+            // Safety:
+            // No other vector references the backing allocation (just checked)
+            // and given that, `as_mut_slice_unchecked` returns a valid slice of
+            // initialized values.
             ptr::drop_in_place(self.as_mut_slice_unchecked());
 
-            // Safety: The vector isn't empty, so `self.ptr` points to an
-            // allocation with the layout of current capacity.
+            // Safety:
+            // The vector isn't empty, so `self.ptr` points to an allocation
+            // with the layout of current capacity.
             alloc::dealloc(self.ptr.as_ptr() as *mut u8, Self::layout(self.capacity()));
         }
     }
@@ -763,6 +766,19 @@ impl<T: PartialOrd> PartialOrd for EcoVec<T> {
     }
 }
 
+impl<T: Clone> From<&[T]> for EcoVec<T> {
+    fn from(slice: &[T]) -> Self {
+        slice.iter().cloned().collect()
+    }
+}
+
+impl<T: Clone> From<Vec<T>> for EcoVec<T> {
+    /// This needs to allocate to change the layout.
+    fn from(vec: Vec<T>) -> Self {
+        vec.into_iter().collect()
+    }
+}
+
 impl<T: Clone> FromIterator<T> for EcoVec<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut vec = Self::new();
@@ -787,16 +803,153 @@ impl<T: Clone> Extend<T> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> From<&[T]> for EcoVec<T> {
-    fn from(slice: &[T]) -> Self {
-        slice.iter().cloned().collect()
+impl<'a, T> IntoIterator for &'a EcoVec<T> {
+    type IntoIter = std::slice::Iter<'a, T>;
+    type Item = &'a T;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
     }
 }
 
-impl<T: Clone> From<Vec<T>> for EcoVec<T> {
-    /// This needs to allocate to change the layout.
-    fn from(vec: Vec<T>) -> Self {
-        vec.into_iter().collect()
+impl<T: Clone> IntoIterator for EcoVec<T> {
+    type IntoIter = IntoIter<T>;
+    type Item = T;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            unique: !self.is_shared(),
+            front: 0,
+            back: self.len(),
+            vec: self,
+        }
+    }
+}
+
+/// An owned iterater over an [`EcoVec`].
+///
+/// If the vector had a reference count of 1, this moves out of the vector,
+/// otherwise it lazily clones.
+pub struct IntoIter<T> {
+    /// The underlying vector.
+    vec: EcoVec<T>,
+    /// Whether we have unique ownership over the underlying allocation.
+    unique: bool,
+    /// How many elements we have already read from the front.
+    /// If `unique` is true, these must not be dropped in our drop impl!
+    ///
+    /// Invariant: `0 <= front <= back`.
+    front: usize,
+    /// How many elements we have already read from the back.
+    /// If `unique` is true, these must not be dropped in our drop impl!
+    ///
+    /// Invariant: `0 <= back <= len`.
+    back: usize,
+}
+
+impl<T> IntoIter<T> {
+    /// Returns the remaining items of this iterator as a slice.
+    pub fn as_slice(&self) -> &[T] {
+        unsafe {
+            // Safety:
+            // - The pointer returned by `data()` is valid for `len` reads.
+            // - Since `front <= back <= len`, `data() + front` is valid for
+            //   `back - front` reads.
+            // - For more details, see `EcoVec::as_slice`.
+            std::slice::from_raw_parts(
+                self.vec.data().add(self.front),
+                self.back - self.front,
+            )
+        }
+    }
+}
+
+impl<T: Clone> Iterator for IntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        (self.front < self.back).then(|| {
+            let prev = self.front;
+            self.front += 1;
+            if self.unique {
+                // Safety:
+                // - We have unique ownership over the underlying allocation.
+                // - The pointer returned by `data()` is valid for `len` reads.
+                // - We know that `prev < self.back <= len`.
+                // - We take ownership of the value and don't drop it again
+                //   in our drop impl.
+                unsafe { ptr::read(self.vec.data().add(prev)) }
+            } else {
+                // Safety:
+                // - We know that `prev < self.back <= len`.
+                unsafe { self.vec.get_unchecked(prev).clone() }
+            }
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.back - self.front;
+        (len, Some(len))
+    }
+
+    fn count(self) -> usize {
+        self.len()
+    }
+}
+
+impl<T: Clone> DoubleEndedIterator for IntoIter<T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        (self.back > self.front).then(|| {
+            self.back -= 1;
+            if self.unique {
+                // Safety:
+                // - We have unique ownership over the underlying allocation.
+                // - The pointer returned by `data()` is valid for `len` reads.
+                // - We know that `self.back < len` at this point.
+                // - We take ownership of the value and don't drop it again
+                //   in our drop impl.
+                unsafe { ptr::read(self.vec.data().add(self.back)) }
+            } else {
+                // Safety:
+                // - Due to the subtraction, `self.back < len` at this point.
+                unsafe { self.vec.get_unchecked(self.back).clone() }
+            }
+        })
+    }
+}
+
+impl<T: Clone> ExactSizeIterator for IntoIter<T> {}
+
+impl<T> Drop for IntoIter<T> {
+    fn drop(&mut self) {
+        if self.unique && self.vec.is_allocated() {
+            // Safety:
+            // We have unique ownership over the underlying allocation.
+            unsafe {
+                // Safety:
+                // The vector is allocated.
+                self.vec.header_mut().len = 0;
+
+                // Safety:
+                // - The elements in `..self.front` and `self.back..` have
+                //   already been moved out of the vector. Thus, we only drop
+                //   the elements that remain in the middle.
+                // - After this, all elements will have been dropped. To prevent
+                //   double dropping in EcoVec's drop impl, we have already set
+                //   the length to `0` before.
+                // - For details about the slicing, see `Self::as_slice()`.
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                    self.vec.data_mut().add(self.front),
+                    self.back - self.front,
+                ));
+            }
+        }
+    }
+}
+
+impl<T: Debug> Debug for IntoIter<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_tuple("IntoIter").field(&self.as_slice()).finish()
     }
 }
 
@@ -814,8 +967,49 @@ fn out_of_bounds(index: usize, len: usize) -> ! {
 mod tests {
     use super::*;
 
+    fn b<T>(value: T) -> Box<T> {
+        Box::new(value)
+    }
+
     #[test]
-    fn test_vec() {
+    fn test_vec_macro() {
+        assert_eq!(eco_vec![Box::new(1); 3], vec![Box::new(1); 3]);
+    }
+
+    #[test]
+    fn test_vec_aliased() {
+        let mut first = EcoVec::new();
+        first.push(1);
+        first.push(2);
+        first.push(3);
+        assert_eq!(first.len(), 3);
+        let mut second = first.clone();
+        second.push(4);
+        assert_eq!(second.len(), 4);
+        assert_eq!(second, [1, 2, 3, 4]);
+        assert_eq!(first, [1, 2, 3]);
+    }
+
+    #[test]
+    fn test_vec_into_iter() {
+        let first = eco_vec![b(2), b(4), b(5)];
+        let mut second = first.clone();
+        assert_eq!(first.clone().into_iter().count(), 3);
+        assert_eq!(
+            second.clone().into_iter().rev().collect::<Vec<_>>(),
+            [b(5), b(4), b(2)]
+        );
+        second.clear();
+        assert_eq!(second.into_iter().collect::<Vec<_>>(), []);
+        assert_eq!(first.clone().into_iter().collect::<Vec<_>>(), [b(2), b(4), b(5)]);
+        let mut iter = first.into_iter();
+        assert_eq!(iter.next(), Some(b(2)));
+        assert_eq!(iter.as_slice(), [b(4), b(5)]);
+        drop(iter);
+    }
+
+    #[test]
+    fn test_vec_mutations() {
         let mut vec: EcoVec<&'static str> =
             "hello, world! what's going on?".split_whitespace().collect();
 
@@ -836,24 +1030,5 @@ mod tests {
         assert_eq!(vec, ["wonder!", "what's", "where?"]);
         vec.truncate(1);
         assert_eq!(vec.last(), vec.first());
-    }
-
-    #[test]
-    fn test_vec_macro() {
-        assert_eq!(eco_vec![Box::new(1); 3], vec![Box::new(1); 3]);
-    }
-
-    #[test]
-    fn test_vec_clone() {
-        let mut vec = EcoVec::new();
-        vec.push(1);
-        vec.push(2);
-        vec.push(3);
-        assert_eq!(vec.len(), 3);
-        let mut vec2 = vec.clone();
-        vec2.push(4);
-        assert_eq!(vec2.len(), 4);
-        assert_eq!(vec2, [1, 2, 3, 4]);
-        assert_eq!(vec, [1, 2, 3]);
     }
 }
