@@ -26,7 +26,11 @@ pub struct EcoString(Repr);
 /// - reference-counted on the heap with clone-on-write semantics.
 #[derive(Clone)]
 enum Repr {
-    Small { buf: [u8; LIMIT], len: u8 },
+    /// Invariant: len <= LIMIT.
+    Small {
+        buf: [u8; LIMIT],
+        len: u8,
+    },
     Large(EcoVec<u8>),
 }
 
@@ -58,9 +62,10 @@ impl EcoString {
     fn from_str_like(string: impl AsRef<str>) -> Self {
         let string = string.as_ref();
         let len = string.len();
-        Self(if len <= LIMIT {
-            let mut buf = [0; LIMIT];
-            buf[..len].copy_from_slice(string.as_bytes());
+        let mut buf = [0; LIMIT];
+        Self(if let Some(head) = buf.get_mut(..len) {
+            // We maintain `len < LIMIT` because `get_mut` succeeded.
+            head.copy_from_slice(string.as_bytes());
             Repr::Small { buf, len: len as u8 }
         } else {
             Repr::Large(string.as_bytes().into())
@@ -82,21 +87,46 @@ impl EcoString {
 
     /// A string slice containing the entire string.
     pub fn as_str(&self) -> &str {
-        self
+        let buf = match &self.0 {
+            Repr::Small { buf, len } => {
+                // Safety:
+                // We have the invariant len <= LIMIT.
+                unsafe { buf.get_unchecked(..usize::from(*len)) }
+            }
+            Repr::Large(vec) => &vec,
+        };
+
+        // Safety:
+        // The buffer contents stem from correct UTF-8 sources:
+        // - Valid ASCII characters
+        // - Other string slices
+        // - Chars that were encoded with char::encode_utf8
+        unsafe { std::str::from_utf8_unchecked(buf) }
     }
 
     /// Append the given character at the end.
     pub fn push(&mut self, c: char) {
-        if let Repr::Small { buf, len } = &mut self.0 {
-            let prev = usize::from(*len);
-            if c.len_utf8() == 1 && prev < LIMIT {
-                buf[prev] = c as u8;
-                *len += 1;
-                return;
+        if c.len_utf8() == 1 {
+            match &mut self.0 {
+                Repr::Small { buf, len } => {
+                    let prev = usize::from(*len);
+                    if let Some(slot) = buf.get_mut(prev) {
+                        // We maintain `len < LIMIT` because `get_mut` succeeded.
+                        *slot = c as u8;
+                        *len += 1;
+                    } else {
+                        debug_assert_eq!(prev, LIMIT);
+                        let mut vec = EcoVec::with_capacity(prev + 1);
+                        vec.extend_from_byte_slice(buf);
+                        vec.push(c as u8);
+                        self.0 = Repr::Large(vec);
+                    }
+                }
+                Repr::Large(vec) => vec.push(c as u8),
             }
+        } else {
+            self.push_str(c.encode_utf8(&mut [0; 4]));
         }
-
-        self.push_str(c.encode_utf8(&mut [0; 4]));
     }
 
     /// Append the given string slice at the end.
@@ -105,14 +135,17 @@ impl EcoString {
             Repr::Small { buf, len } => {
                 let prev = usize::from(*len);
                 let new = prev + string.len();
-                if new <= LIMIT {
-                    buf[prev..new].copy_from_slice(string.as_bytes());
+                if let Some(segment) = buf.get_mut(prev..new) {
+                    // We maintain `len < LIMIT` because `get_mut` succeeded.
+                    segment.copy_from_slice(string.as_bytes());
                     *len = new as u8;
                 } else {
-                    let mut spilled = String::with_capacity(new);
-                    spilled.push_str(self);
-                    spilled.push_str(string);
-                    *self = spilled.into();
+                    // Safety: See `Self::as_str()`.
+                    let existing = unsafe { buf.get_unchecked(..prev) };
+                    let mut vec = EcoVec::with_capacity(prev + string.len());
+                    vec.extend_from_byte_slice(existing);
+                    vec.extend_from_byte_slice(string.as_bytes());
+                    self.0 = Repr::Large(vec);
                 }
             }
             Repr::Large(vec) => vec.extend_from_byte_slice(string.as_bytes()),
@@ -123,10 +156,13 @@ impl EcoString {
     pub fn pop(&mut self) -> Option<char> {
         let c = self.as_str().chars().rev().next()?;
         let len_utf8 = c.len_utf8();
+
+        // Will not underflow because the char was decoded from the buffer.
         match &mut self.0 {
             Repr::Small { len, .. } => *len -= len_utf8 as u8,
             Repr::Large(vec) => vec.truncate(vec.len() - len_utf8),
         }
+
         Some(c)
     }
 
@@ -147,7 +183,20 @@ impl EcoString {
             }
         }
 
-        self.as_str().to_lowercase().into()
+        let str = self.as_str();
+        let mut lower = Self::with_capacity(str.len());
+        for c in str.chars() {
+            // Let std handle the special case.
+            if c == 'Σ' {
+                return str.to_lowercase().into();
+            }
+
+            for v in c.to_lowercase() {
+                lower.push(v);
+            }
+        }
+
+        lower
     }
 
     /// Convert the string to uppercase.
@@ -159,7 +208,15 @@ impl EcoString {
             }
         }
 
-        self.as_str().to_uppercase().into()
+        let str = self.as_str();
+        let mut upper = Self::with_capacity(str.len());
+        for c in str.chars() {
+            for v in c.to_uppercase() {
+                upper.push(v);
+            }
+        }
+
+        upper
     }
 
     /// Repeat this string `n` times.
@@ -177,11 +234,20 @@ impl EcoString {
                 for i in 0..n {
                     buf[prev * i..prev * (i + 1)].copy_from_slice(src);
                 }
+
+                // We maintain `len < LIMIT` because of the check above.
                 return Self(Repr::Small { buf, len: new as u8 });
             }
         }
 
-        self.as_str().repeat(n).into()
+        let slice = self.as_bytes();
+        let capacity = slice.len().saturating_mul(n);
+        let mut vec = EcoVec::with_capacity(capacity);
+        for _ in 0..n {
+            vec.extend_from_byte_slice(slice);
+        }
+
+        Self(Repr::Large(vec))
     }
 }
 
@@ -189,19 +255,7 @@ impl Deref for EcoString {
     type Target = str;
 
     fn deref(&self) -> &str {
-        let buf = match &self.0 {
-            Repr::Small { buf, len } => &buf[..usize::from(*len)],
-            Repr::Large(vec) => &vec,
-        };
-
-        // Safety:
-        // The buffer contents stem from correct UTF-8 sources:
-        // - Valid ASCII characters
-        // - Other string slices
-        // - Chars that were encoded with char::encode_utf8
-        // Furthermore, we still do the bounds-check on the len in case
-        // it gets corrupted somehow.
-        unsafe { std::str::from_utf8_unchecked(buf) }
+        self.as_str()
     }
 }
 
@@ -326,6 +380,7 @@ impl Borrow<str> for EcoString {
 
 impl From<char> for EcoString {
     fn from(c: char) -> Self {
+        // We maintain `len < LIMIT` because `LIMIT >= 4`.
         let mut buf = [0; LIMIT];
         let len = c.encode_utf8(&mut buf).len();
         Self(Repr::Small { buf, len: len as u8 })
@@ -425,6 +480,7 @@ mod tests {
 
         // Test spilling with `push`.
         let mut a = v.clone();
+        assert_eq!(a, "abcd😀efghij");
         a.push('k');
         assert_eq!(a, "abcd😀efghijk");
         assert_eq!(a.len(), 15);
