@@ -9,7 +9,12 @@ use std::ops::Deref;
 use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
-/// Create a new [`EcoVec`] from a format string.
+/// Create a new [`EcoVec`] with the given elements.
+/// ```
+/// # use ecow::eco_vec;
+/// assert_eq!(eco_vec![1; 4], [1; 4]);
+/// assert_eq!(eco_vec![1, 2, 3], [1, 2, 3]);
+/// ```
 #[macro_export]
 macro_rules! eco_vec {
     () => { $crate::EcoVec::new() };
@@ -25,10 +30,31 @@ macro_rules! eco_vec {
 
 /// An economical vector with clone-on-write semantics.
 ///
-/// Has a size of one word and is null-pointer optimized (meaning that
+/// Most mutating methods require `T: Clone` due to clone-on-write semantics.
+///
+/// This type has a size of one word and is null-pointer optimized (meaning that
 /// `Option<EcoVec<T>>` also takes only one word).
 ///
-/// Most mutating methods require `T: Clone` due to clone-on-write semantics.
+/// # Example
+/// ```
+/// use ecow::EcoVec;
+///
+/// // Empty vector does not allocate, but first push does.
+/// let mut first = EcoVec::new();
+/// first.push(1);
+/// first.push(2);
+///
+/// // This clone is cheap, it references the same allocation.
+/// let mut second = first.clone();
+///
+/// // This makes a real copy (clone-on-write).
+/// second.push(3);
+///
+/// // As `second` was cloned upon mutation, this iterator can
+/// // move the elements. If the allocation was still shared with
+/// // `first`, this would clone lazily.
+/// assert_eq!(second.into_iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+/// ```
 pub struct EcoVec<T> {
     /// Must always point to a valid header.
     ///

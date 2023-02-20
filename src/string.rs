@@ -7,17 +7,44 @@ use std::ops::{Add, AddAssign, Deref};
 use super::EcoVec;
 
 /// Create a new [`EcoString`] from a format string.
+/// ```
+/// # use ecow::format_eco;
+/// assert_eq!(format_eco!("Hello, {}!", 123), "Hello, 123!");
+/// ```
 #[macro_export]
 macro_rules! format_eco {
     ($($tts:tt)*) => {{
-        use std::fmt::Write;
-        let mut s = $crate::util::EcoString::new();
-        write!(s, $($tts)*).unwrap();
+        use ::std::fmt::Write;
+        let mut s = $crate::EcoString::new();
+        ::std::write!(s, $($tts)*).unwrap();
         s
     }};
 }
 
 /// An economical string with inline storage and clone-on-write semantics.
+///
+/// This type has a size of 16 bytes and is null-pointer optimized (meaning that
+/// `Option<EcoString>` also takes 16 bytes). It has 14 bytes of inline storage
+/// and starting from 15 bytes it becomes an `EcoVec<u8>`.
+///
+/// # Example
+/// ```
+/// use ecow::EcoString;
+///
+/// // This is stored inline.
+/// let small = EcoString::from("Welcome");
+///
+/// // This spills to the heap only once: `big` and `third` share the same
+/// // underlying allocation. Just like vectors, heap strings are only really
+/// // cloned upon mutation.
+/// let big = small + " to planet earth! 🌱";
+/// let mut third = big.clone();
+/// assert_eq!(third, "Welcome to planet earth! 🌱");
+///
+/// // This allocates again to mutate `third` without affecting `big`.
+/// assert_eq!(third.pop(), Some('🌱'));
+/// assert_eq!(big, "Welcome to planet earth! 🌱");
+/// ```
 #[derive(Clone)]
 pub struct EcoString(Repr);
 
@@ -363,6 +390,21 @@ impl Add for EcoString {
 impl AddAssign for EcoString {
     fn add_assign(&mut self, rhs: Self) {
         self.push_str(rhs.as_str());
+    }
+}
+
+impl Add<&str> for EcoString {
+    type Output = Self;
+
+    fn add(mut self, rhs: &str) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl AddAssign<&str> for EcoString {
+    fn add_assign(&mut self, rhs: &str) {
+        self.push_str(rhs);
     }
 }
 
