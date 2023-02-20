@@ -202,8 +202,7 @@ impl<T: Clone> EcoVec<T> {
         self.reserve((len == self.capacity()) as usize);
 
         // Safety:
-        // The reference count is `1` because either `reserve` or `make_unique`
-        // has been called.
+        // The reference count is `1` because of `reserve`.
         unsafe {
             // Safety:
             // - The vector has a backing allocation because if `len` was `0`,
@@ -265,8 +264,7 @@ impl<T: Clone> EcoVec<T> {
         self.reserve((len == self.capacity()) as usize);
 
         // Safety:
-        // The reference count is `1` because either `reserve` or `make_unique`
-        // has been called.
+        // The reference count is `1` because of `reserve`.
         unsafe {
             // Safety:
             // - The vector has a backing allocation because if `len` was `0`,
@@ -378,7 +376,7 @@ impl<T: Clone> EcoVec<T> {
 
         if self.is_shared() {
             // Safety: Just checked bounds.
-            *self = unsafe { self.get_unchecked(..target) }.iter().cloned().collect();
+            *self = Self::from(unsafe { self.get_unchecked(..target) });
             return;
         }
 
@@ -441,12 +439,81 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
+    /// Clones and pushes all elements in a slice to the vector.
+    pub fn extend_from_slice(&mut self, slice: &[T]) {
+        self.reserve(slice.len());
+        let prev = self.len();
+
+        // Safety:
+        // The reference count is `1` because of `reserve`.
+        unsafe {
+            // Safety: See `push`.
+            for (i, value) in slice.iter().enumerate() {
+                ptr::write(self.data_mut().add(prev + i), value.clone());
+            }
+
+            // Safety:
+            // Only increase after writing all values in case `.clone()` panics.
+            self.header_mut().len += slice.len();
+        }
+    }
+
+    /// Clones and pushes all elements in a slice to the vector.
+    ///
+    /// The iterator must produce exactly `count` items.
+    unsafe fn extend_from_trusted<I>(&mut self, count: usize, iter: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
+        self.reserve(count);
+        let prev = self.len();
+
+        // Safety:
+        // The reference count is `1` because of `reserve`.
+        unsafe {
+            // Safety: See `push`.
+            for (i, value) in iter.into_iter().enumerate() {
+                ptr::write(self.data_mut().add(prev + i), value);
+            }
+
+            // Safety:
+            // Only increase after writing all values in case `.clone()` panics.
+            self.header_mut().len += prev;
+        }
+    }
+
     /// Ensure that this vector has a unique backing allocation.
     ///
     /// May change the capacity.
     fn make_unique(&mut self) {
         if self.is_shared() {
-            *self = self.iter().cloned().collect();
+            *self = Self::from(self.as_slice());
+        }
+    }
+}
+
+impl EcoVec<u8> {
+    /// Copies from a byte slice.
+    pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
+        self.reserve(bytes.len());
+
+        // Safety:
+        // The reference count is `1` because of `reserve`.
+        unsafe {
+            // Safety:
+            // - The source slice is valid for `bytes.len()` reads.
+            // - The destination is valid for `bytes.len()` more writes due to
+            //   the `reserve` call.
+            // - The two ranges are non-overlapping because we hold a mutable
+            //   reference to `self` and an immutable one to `bytes`.
+            ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                self.data_mut().add(self.len()),
+                bytes.len(),
+            );
+
+            // Safety: See `push`.
+            self.header_mut().len += bytes.len();
         }
     }
 }
@@ -772,20 +839,29 @@ impl<T: PartialOrd> PartialOrd for EcoVec<T> {
 
 impl<T: Clone> From<&[T]> for EcoVec<T> {
     fn from(slice: &[T]) -> Self {
-        slice.iter().cloned().collect()
+        let mut vec = Self::new();
+        vec.extend_from_slice(slice);
+        vec
     }
 }
 
 impl<T: Clone> From<Vec<T>> for EcoVec<T> {
     /// This needs to allocate to change the layout.
-    fn from(vec: Vec<T>) -> Self {
-        vec.into_iter().collect()
+    fn from(other: Vec<T>) -> Self {
+        let mut vec = Self::new();
+        unsafe {
+            // Safety: Vec implements `TrustedLen`.
+            vec.extend_from_trusted(other.len(), other.into_iter());
+        }
+        vec
     }
 }
 
 impl<T: Clone> FromIterator<T> for EcoVec<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut vec = Self::new();
+        let iter = iter.into_iter();
+        let hint = iter.size_hint().0;
+        let mut vec = Self::with_capacity(hint);
         vec.extend(iter);
         vec
     }
@@ -1034,5 +1110,12 @@ mod tests {
         assert_eq!(vec, ["wonder!", "what's", "where?"]);
         vec.truncate(1);
         assert_eq!(vec.last(), vec.first());
+    }
+
+    #[test]
+    fn test_vec_extend() {
+        let mut vec = EcoVec::new();
+        vec.extend_from_byte_slice(&[2, 3, 4]);
+        assert_eq!(vec, [2, 3, 4]);
     }
 }

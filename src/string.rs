@@ -115,7 +115,7 @@ impl EcoString {
                     *self = spilled.into();
                 }
             }
-            Repr::Large(vec) => vec.extend(string.as_bytes().iter().copied()),
+            Repr::Large(vec) => vec.extend_from_byte_slice(string.as_bytes()),
         }
     }
 
