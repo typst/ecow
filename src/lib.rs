@@ -15,3 +15,6 @@ mod vec;
 
 pub use string::*;
 pub use vec::*;
+
+#[cfg(test)]
+mod tests;

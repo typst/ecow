@@ -41,7 +41,7 @@ enum Repr {
 /// platforms).
 ///
 /// Must be at least 4 to hold any char.
-const LIMIT: usize = 14;
+pub(crate) const LIMIT: usize = 14;
 
 impl EcoString {
     /// Create a new, empty string.
@@ -439,117 +439,5 @@ impl From<EcoString> for String {
 impl From<&EcoString> for String {
     fn from(s: &EcoString) -> Self {
         s.as_str().to_owned()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
-
-    #[test]
-    fn test_str_new() {
-        // Test inline strings.
-        assert_eq!(EcoString::new(), "");
-        assert_eq!(EcoString::from('a'), "a");
-        assert_eq!(EcoString::from('😀'), "😀");
-        assert_eq!(EcoString::from("abc"), "abc");
-
-        // Test around the inline limit.
-        assert_eq!(EcoString::from(&ALPH[..LIMIT - 1]), ALPH[..LIMIT - 1]);
-        assert_eq!(EcoString::from(&ALPH[..LIMIT]), ALPH[..LIMIT]);
-        assert_eq!(EcoString::from(&ALPH[..LIMIT + 1]), ALPH[..LIMIT + 1]);
-
-        // Test heap string.
-        assert_eq!(EcoString::from(ALPH), ALPH);
-    }
-
-    #[test]
-    fn test_str_push() {
-        let mut v = EcoString::new();
-        v.push('a');
-        v.push('b');
-        v.push_str("cd😀");
-        assert_eq!(v, "abcd😀");
-        assert_eq!(v.len(), 8);
-
-        // Test fully filling the inline storage.
-        v.push_str("efghij");
-        assert_eq!(v.len(), LIMIT);
-
-        // Test spilling with `push`.
-        let mut a = v.clone();
-        assert_eq!(a, "abcd😀efghij");
-        a.push('k');
-        assert_eq!(a, "abcd😀efghijk");
-        assert_eq!(a.len(), 15);
-
-        // Test spilling with `push_str`.
-        let mut b = v.clone();
-        b.push_str("klmn");
-        assert_eq!(b, "abcd😀efghijklmn");
-        assert_eq!(b.len(), 18);
-
-        // v should be unchanged.
-        assert_eq!(v.len(), LIMIT);
-    }
-
-    #[test]
-    fn test_str_pop() {
-        // Test with inline string.
-        let mut v = EcoString::from("Hello World!");
-        assert_eq!(v.pop(), Some('!'));
-        assert_eq!(v, "Hello World");
-
-        // Remove one-by-one.
-        for _ in 0..10 {
-            v.pop();
-        }
-
-        assert_eq!(v, "H");
-        assert_eq!(v.pop(), Some('H'));
-        assert_eq!(v, "");
-        assert!(v.is_empty());
-
-        // Test with large string.
-        let mut v = EcoString::from(ALPH);
-        assert_eq!(v.pop(), Some('z'));
-        assert_eq!(v.len(), 25);
-    }
-
-    #[test]
-    fn test_str_index() {
-        // Test that we can use the index syntax.
-        let v = EcoString::from("abc");
-        assert_eq!(&v[..2], "ab");
-    }
-
-    #[test]
-    fn test_str_case() {
-        assert_eq!(EcoString::new().to_uppercase(), "");
-        assert_eq!(EcoString::from("abc").to_uppercase(), "ABC");
-        assert_eq!(EcoString::from("AΣ").to_lowercase(), "aς");
-        assert_eq!(
-            EcoString::from("a").repeat(100).to_uppercase(),
-            EcoString::from("A").repeat(100)
-        );
-        assert_eq!(
-            EcoString::from("Ö").repeat(20).to_lowercase(),
-            EcoString::from("ö").repeat(20)
-        );
-    }
-
-    #[test]
-    fn test_str_repeat() {
-        // Test with empty string.
-        assert_eq!(EcoString::new().repeat(0), "");
-        assert_eq!(EcoString::new().repeat(100), "");
-
-        // Test non-spilling and spilling case.
-        let v = EcoString::from("abc");
-        assert_eq!(v.repeat(0), "");
-        assert_eq!(v.repeat(3), "abcabcabc");
-        assert_eq!(v.repeat(5), "abcabcabcabcabc");
     }
 }

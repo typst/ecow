@@ -457,65 +457,6 @@ impl<T: Clone> EcoVec<T> {
             self.header_mut().len += slice.len();
         }
     }
-
-    /// Clones and pushes all elements in a slice to the vector.
-    ///
-    /// The iterator must produce exactly `count` items.
-    unsafe fn extend_from_trusted<I>(&mut self, count: usize, iter: I)
-    where
-        I: IntoIterator<Item = T>,
-    {
-        self.reserve(count);
-        let prev = self.len();
-
-        // Safety:
-        // The reference count is `1` because of `reserve`.
-        unsafe {
-            // Safety: See `push`.
-            for (i, value) in iter.into_iter().enumerate() {
-                ptr::write(self.data_mut().add(prev + i), value);
-            }
-
-            // Safety:
-            // Only increase after writing all values in case `.clone()` panics.
-            self.header_mut().len += prev;
-        }
-    }
-
-    /// Ensure that this vector has a unique backing allocation.
-    ///
-    /// May change the capacity.
-    fn make_unique(&mut self) {
-        if self.is_shared() {
-            *self = Self::from(self.as_slice());
-        }
-    }
-}
-
-impl EcoVec<u8> {
-    /// Copies from a byte slice.
-    pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
-        self.reserve(bytes.len());
-
-        // Safety:
-        // The reference count is `1` because of `reserve`.
-        unsafe {
-            // Safety:
-            // - The source slice is valid for `bytes.len()` reads.
-            // - The destination is valid for `bytes.len()` more writes due to
-            //   the `reserve` call.
-            // - The two ranges are non-overlapping because we hold a mutable
-            //   reference to `self` and an immutable one to `bytes`.
-            ptr::copy_nonoverlapping(
-                bytes.as_ptr(),
-                self.data_mut().add(self.len()),
-                bytes.len(),
-            );
-
-            // Safety: See `push`.
-            self.header_mut().len += bytes.len();
-        }
-    }
 }
 
 impl<T> EcoVec<T> {
@@ -692,6 +633,67 @@ impl<T> EcoVec<T> {
             4
         } else {
             1
+        }
+    }
+}
+
+impl<T: Clone> EcoVec<T> {
+    /// Clones and pushes all elements in a trusted-len iterator to the vector.
+    ///
+    /// The iterator must produce exactly `count` items.
+    unsafe fn extend_from_trusted<I>(&mut self, count: usize, iter: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
+        self.reserve(count);
+        let prev = self.len();
+
+        // Safety:
+        // The reference count is `1` because of `reserve`.
+        unsafe {
+            // Safety: See `push`.
+            for (i, value) in iter.into_iter().enumerate() {
+                ptr::write(self.data_mut().add(prev + i), value);
+            }
+
+            // Safety:
+            // Only increase after writing all values in case `.clone()` panics.
+            self.header_mut().len += prev;
+        }
+    }
+
+    /// Ensure that this vector has a unique backing allocation.
+    ///
+    /// May change the capacity.
+    fn make_unique(&mut self) {
+        if self.is_shared() {
+            *self = Self::from(self.as_slice());
+        }
+    }
+}
+
+impl EcoVec<u8> {
+    /// Copies from a byte slice.
+    pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
+        self.reserve(bytes.len());
+
+        // Safety:
+        // The reference count is `1` because of `reserve`.
+        unsafe {
+            // Safety:
+            // - The source slice is valid for `bytes.len()` reads.
+            // - The destination is valid for `bytes.len()` more writes due to
+            //   the `reserve` call.
+            // - The two ranges are non-overlapping because we hold a mutable
+            //   reference to `self` and an immutable one to `bytes`.
+            ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                self.data_mut().add(self.len()),
+                bytes.len(),
+            );
+
+            // Safety: See `push`.
+            self.header_mut().len += bytes.len();
         }
     }
 }
@@ -1041,81 +1043,4 @@ fn capacity_overflow() -> ! {
 #[cold]
 fn out_of_bounds(index: usize, len: usize) -> ! {
     panic!("index is out bounds (index: {index}, len: {len})");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn b<T>(value: T) -> Box<T> {
-        Box::new(value)
-    }
-
-    #[test]
-    fn test_vec_macro() {
-        assert_eq!(eco_vec![Box::new(1); 3], vec![Box::new(1); 3]);
-    }
-
-    #[test]
-    fn test_vec_aliased() {
-        let mut first = EcoVec::new();
-        first.push(1);
-        first.push(2);
-        first.push(3);
-        assert_eq!(first.len(), 3);
-        let mut second = first.clone();
-        second.push(4);
-        assert_eq!(second.len(), 4);
-        assert_eq!(second, [1, 2, 3, 4]);
-        assert_eq!(first, [1, 2, 3]);
-    }
-
-    #[test]
-    fn test_vec_into_iter() {
-        let first = eco_vec![b(2), b(4), b(5)];
-        let mut second = first.clone();
-        assert_eq!(first.clone().into_iter().count(), 3);
-        assert_eq!(
-            second.clone().into_iter().rev().collect::<Vec<_>>(),
-            [b(5), b(4), b(2)]
-        );
-        second.clear();
-        assert_eq!(second.into_iter().collect::<Vec<_>>(), []);
-        assert_eq!(first.clone().into_iter().collect::<Vec<_>>(), [b(2), b(4), b(5)]);
-        let mut iter = first.into_iter();
-        assert_eq!(iter.next(), Some(b(2)));
-        assert_eq!(iter.as_slice(), [b(4), b(5)]);
-        drop(iter);
-    }
-
-    #[test]
-    fn test_vec_mutations() {
-        let mut vec: EcoVec<&'static str> =
-            "hello, world! what's going on?".split_whitespace().collect();
-
-        assert_eq!(vec.len(), 5);
-        assert_eq!(vec.capacity(), 8);
-        assert_eq!(vec, ["hello,", "world!", "what's", "going", "on?"]);
-        assert_eq!(vec.pop(), Some("on?"));
-        assert_eq!(vec.len(), 4);
-        assert_eq!(vec.last(), Some(&"going"));
-        assert_eq!(vec.remove(1), "world!");
-        assert_eq!(vec.len(), 3);
-        assert_eq!(vec, ["hello,", "what's", "going"]);
-        assert_eq!(vec[1], "what's");
-        vec.push("where?");
-        vec.insert(1, "wonder!");
-        assert_eq!(vec, ["hello,", "wonder!", "what's", "going", "where?"]);
-        vec.retain(|s| s.starts_with("w"));
-        assert_eq!(vec, ["wonder!", "what's", "where?"]);
-        vec.truncate(1);
-        assert_eq!(vec.last(), vec.first());
-    }
-
-    #[test]
-    fn test_vec_extend() {
-        let mut vec = EcoVec::new();
-        vec.extend_from_byte_slice(&[2, 3, 4]);
-        assert_eq!(vec, [2, 3, 4]);
-    }
 }
