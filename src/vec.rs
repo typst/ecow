@@ -1140,27 +1140,29 @@ impl<T: Clone> ExactSizeIterator for IntoIter<T> {}
 
 impl<T> Drop for IntoIter<T> {
     fn drop(&mut self) {
-        if self.unique && self.vec.is_allocated() {
-            // Safety:
-            // We have unique ownership over the underlying allocation.
-            unsafe {
-                // Safety:
-                // The vector is allocated.
-                self.vec.header_mut().len = 0;
+        if !self.unique || !self.vec.is_allocated() {
+            return;
+        }
 
-                // Safety:
-                // - The elements in `..self.front` and `self.back..` have
-                //   already been moved out of the vector. Thus, we only drop
-                //   the elements that remain in the middle.
-                // - After this, all elements will have been dropped. To prevent
-                //   double dropping in EcoVec's drop impl, we have already set
-                //   the length to `0` before.
-                // - For details about the slicing, see `Self::as_slice()`.
-                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
-                    self.vec.data_mut().add(self.front),
-                    self.back - self.front,
-                ));
-            }
+        // Safety:
+        // We have unique ownership over the underlying allocation.
+        unsafe {
+            // Safety:
+            // The vector is allocated.
+            self.vec.header_mut().len = 0;
+
+            // Safety:
+            // - The elements in `..self.front` and `self.back..` have
+            //   already been moved out of the vector. Thus, we only drop
+            //   the elements that remain in the middle.
+            // - After this, all elements will have been dropped. To prevent
+            //   double dropping in EcoVec's drop impl, we have already set
+            //   the length to `0` before.
+            // - For details about the slicing, see `Self::as_slice()`.
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                self.vec.data_mut().add(self.front),
+                self.back - self.front,
+            ));
         }
     }
 }
