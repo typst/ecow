@@ -154,7 +154,7 @@ fn test_vec_more_mutations() {
     vec.push("where?");
     vec.insert(1, "wonder!");
     assert_eq!(vec, ["hello,", "wonder!", "what's", "going", "where?"]);
-    vec.retain(|s| s.starts_with("w"));
+    vec.retain(|s| s.starts_with('w'));
     assert_eq!(vec, ["wonder!", "what's", "where?"]);
     vec.truncate(1);
     assert_eq!(vec.last(), vec.first());

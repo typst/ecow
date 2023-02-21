@@ -666,7 +666,7 @@ impl<T> EcoVec<T> {
             .and_then(|size| Self::offset().checked_add(size))
             .filter(|&size| {
                 // See `Layout::max_size_for_align` for details.
-                size <= isize::MAX as usize - Self::align() - 1
+                size < isize::MAX as usize - Self::align()
             })
             .unwrap_or_else(|| capacity_overflow())
     }
@@ -946,14 +946,14 @@ impl<T: PartialEq> PartialEq<EcoVec<T>> for Vec<T> {
 impl<T: Ord> Ord for EcoVec<T> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
-        self.as_slice().cmp(&other.as_slice())
+        self.as_slice().cmp(other.as_slice())
     }
 }
 
 impl<T: PartialOrd> PartialOrd for EcoVec<T> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_slice().partial_cmp(&other.as_slice())
+        self.as_slice().partial_cmp(other.as_slice())
     }
 }
 

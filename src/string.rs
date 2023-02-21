@@ -133,7 +133,7 @@ impl EcoString {
                 // We have the invariant len <= LIMIT.
                 unsafe { buf.get_unchecked(..usize::from(*len)) }
             }
-            Repr::Large(vec) => &vec,
+            Repr::Large(vec) => vec,
         };
 
         // Safety:
