@@ -1,5 +1,6 @@
 // Test with `cargo +nightly miri test` to check sanity!
 
+use core::mem;
 use core::sync::atomic::{AtomicUsize, Ordering::*};
 
 use alloc::boxed::Box;
@@ -12,6 +13,11 @@ const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
 
 fn v<T>(value: T) -> Box<T> {
     Box::new(value)
+}
+
+#[test]
+fn test_mem_size() {
+    assert_eq!(mem::size_of::<EcoVec<u8>>(), 2 * mem::size_of::<usize>());
 }
 
 #[test]
