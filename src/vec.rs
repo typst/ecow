@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::borrow::Borrow;
 use core::cmp::{self, Ordering};
@@ -9,10 +10,7 @@ use core::ops::Deref;
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{self, AtomicUsize, Ordering::*};
 
-use alloc::vec::Vec;
-
 /// Create a new [`EcoVec`] with the given elements.
-/// ```
 /// # use ecow::eco_vec;
 /// assert_eq!(eco_vec![1; 4], [1; 4]);
 /// assert_eq!(eco_vec![1, 2, 3], [1, 2, 3]);
@@ -32,12 +30,17 @@ macro_rules! eco_vec {
 
 /// An economical vector with clone-on-write semantics.
 ///
-/// This type has a size of one word and is null-pointer optimized (meaning that
-/// [`Option<EcoVec<T>>`] also takes only one word). Within its allocation it
-/// stores a reference count, its length, and its capacity. In contrast to an
-/// [`Arc<Vec<T>>`](std::sync::Arc), this type only requires a single allocation
-/// for both the reference count and the elements. The internal reference
-/// counter is atomic, making this type [`Sync`] and [`Send`].
+/// This type has the same layout as a slice `&[T]`: It consists of a pointer
+/// and a length. The pointer is null-pointer optimized (meaning that
+///  [`Option<EcoVec<T>>`] has the same size as `EcoVec<T>`). Dereferencing an
+/// `EcoVec` to a slice is a no-op (unless T has huge alignment, which shouldn't
+/// happen in normal circumstances).
+///
+/// Within its allocation, an `EcoVec` stores a reference count and its
+/// capacity. In contrast to an [`Arc<Vec<T>>`](std::sync::Arc), it only
+/// requires a single allocation for both the reference count and the elements.
+/// The internal reference counter is atomic, making this type [`Sync`] and
+/// [`Send`].
 ///
 /// Note that most mutating methods require [`T: Clone`](Clone) due to
 /// clone-on-write semantics.
@@ -66,23 +69,16 @@ macro_rules! eco_vec {
 /// ```
 #[repr(C)]
 pub struct EcoVec<T> {
-    /// Must always point to a valid header.
+    /// May point to `SENTINEL` if the vector is empty. Then, it is aligned to
+    /// the sentinel type's alignment.
     ///
-    /// This may point to the `EMPTY` header if the vector is empty. Then, it is
-    /// aligned to the header's alignment and may not be mutated.
-    ///
-    /// Otherwise, this points to a backing allocation. Then, it is aligned to
-    /// the maximum of the header's and T's alignment and may be mutated. (At
-    /// least the reference-count. To mutate elements, we additionally require
-    /// the reference-count to be `1`.)
-    ///
-    /// The `ptr` offset by `Self::offset()` is valid for `len` reads and
-    /// `capacity` writes, but if it points to the `EMPTY` header, it may to be
-    /// aligned to T's alignment.
-    ptr: NonNull<Header>,
+    /// Otherwise, points `Self::offset()` bytes after a valid allocation and
+    /// header, to the start of the vector's elements. It is then aligned to the
+    /// maximum of the header's alignment and T's alignment. The pointer is
+    /// valid for `len` reads and `capacity` writes of T. The elements may only
+    /// be accessed mutably if the reference-count is `1`.
+    ptr: NonNull<u8>,
     /// The number of elements in the vector.
-    ///
-    /// May only be mutated if `refs == 1`.
     ///
     /// Invariant: `len <= capacity`.
     len: usize,
@@ -90,10 +86,11 @@ pub struct EcoVec<T> {
     phantom: PhantomData<T>,
 }
 
-/// The start of the data.
+/// The start of the backing allocation.
 ///
 /// This is followed by padding, if necessary, and then the actual data.
 #[derive(Debug)]
+#[repr(align(2))]
 struct Header {
     /// The vector's reference count. Starts at 1 and only drops to zero
     /// when the last vector is dropped.
@@ -109,20 +106,25 @@ struct Header {
     capacity: usize,
 }
 
-/// The header used for a vector without any items.
-static EMPTY: Header = Header { refs: AtomicUsize::new(1), capacity: 0 };
+/// A type with big alignment used for the address of an unallocated, empty vec.
+#[repr(align(32))]
+struct Sentinel;
+
+/// A value with big alignment whose address if used as a sentinel value for an
+/// unallocated, empty vec.
+///
+/// `EcoVec<T>`'s deref to a slice is a no-op if T's alignment is less than or
+/// equal to this type's alignment. Otherwise it has a check.
+static SENTINEL: Sentinel = Sentinel;
 
 impl<T> EcoVec<T> {
     /// Create a new, empty vector.
     #[inline]
     pub fn new() -> Self {
         Self {
-            // Safety:
-            // The `ptr` may be the `EMPTY` header if the vector is empty. The
-            // address of `EMPTY` is naturally aligned to the header's
-            // alignment.
+            // Safety: References are never null.
             ptr: unsafe {
-                NonNull::new_unchecked(&EMPTY as *const Header as *mut Header)
+                NonNull::new_unchecked(&SENTINEL as *const Sentinel as *mut u8)
             },
             len: 0,
             phantom: PhantomData,
@@ -163,7 +165,7 @@ impl<T> EcoVec<T> {
     /// allocate if the reference count is larger than one.
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.header().capacity
+        self.header().map_or(0, |header| header.capacity)
     }
 
     /// Extracts a slice containing the entire vector.
@@ -176,7 +178,7 @@ impl<T> EcoVec<T> {
         // - The memory referenced by the slice isn't mutated for the returned
         //   slice's lifetime, because `self` becomes borrowed and even if there
         //   are other vectors referencing the same backing allocation, they are
-        //   now allowed to mutate the slice since the ref-count would be larger
+        //   now allowed to mutate the slice since then the ref-count is larger
         //   than one.
         unsafe { core::slice::from_raw_parts(self.data(), self.len) }
     }
@@ -212,8 +214,8 @@ impl<T> EcoVec<T> {
             //   as this is the only live vector available for cloning and we
             //   hold a mutable reference to it.
             // - The pointer returned by `data_mut()` is valid for `capacity`
-            //   writes, we have the invariant `len <= capacity` and thus,
-            //   `data_mut()` is valid for `len` writes.
+            //   writes, we have the invariant `prev <= capacity` and thus,
+            //   `data_mut()` is valid for `prev` writes.
             ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.data_mut(), prev));
         }
     }
@@ -239,7 +241,8 @@ impl<T: Clone> EcoVec<T> {
 
         // Safety:
         // The reference count is `1` because of `make_unique`.
-        unsafe { self.as_mut_slice_unchecked() }
+        // For more details, see `Self::as_slice()`.
+        unsafe { core::slice::from_raw_parts_mut(self.data_mut(), self.len) }
     }
 
     /// Add a value at the end of the vector.
@@ -252,7 +255,7 @@ impl<T: Clone> EcoVec<T> {
 
         unsafe {
             // Safety:
-            // The reference count is `1` because of `reserve`.
+            // - The reference count is `1` because of `reserve`.
             // - The pointer returned by `data_mut()` is valid for `capacity`
             //   writes.
             // - Due to the `reserve` call, `len < capacity`.
@@ -304,10 +307,9 @@ impl<T: Clone> EcoVec<T> {
         // Ensure unique ownership and grow the vector if necessary.
         self.reserve((self.len == self.capacity()) as usize);
 
-        // Safety:
-        // The reference count is `1` because of `reserve`.
         unsafe {
             // Safety:
+            // - The reference count is `1` because of `reserve`.
             // - The pointer returned by `data_mut()` is valid for `len`
             //   reads and `capacity` writes of `T`.
             // - Thus, `at` is valid for `len - index` reads of `T`
@@ -344,10 +346,9 @@ impl<T: Clone> EcoVec<T> {
 
         self.make_unique();
 
-        // Safety:
-        // The reference count is `1` because of `make_unique`.
         unsafe {
             // Safety:
+            // - The reference count is `1` because of `make_unique`.
             // - The pointer returned by `data()` is valid for `len` reads.
             // - Due to the check above, `index < len`.
             // - Thus, `at` is valid for one read.
@@ -417,10 +418,10 @@ impl<T: Clone> EcoVec<T> {
             return;
         }
 
+        let rest = self.len - target;
         unsafe {
             // Safety:
-            // - Since `target < len`, we maintain `len < capacity`.
-            let rest = self.len - target;
+            // - Since `target < len`, we maintain `len <= capacity`.
             self.len = target;
 
             // Safety:
@@ -442,8 +443,8 @@ impl<T: Clone> EcoVec<T> {
     /// for `additional` more elements.
     pub fn reserve(&mut self, additional: usize) {
         let capacity = self.capacity();
-
         let mut target = capacity;
+
         if additional > capacity - self.len {
             // Reserve at least the `additional` capacity, but also at least
             // double the capacity to ensure exponential growth and finally
@@ -468,7 +469,6 @@ impl<T: Clone> EcoVec<T> {
                 // - The `target` capacity is greater than the current capacity
                 //   because `additional > 0`.
                 self.grow(target);
-                return;
             }
         }
     }
@@ -516,12 +516,12 @@ impl<T> EcoVec<T> {
         }
 
         // Directly go to maximum capacity for ZSTs.
-        if core::mem::size_of::<T>() == 0 {
+        if mem::size_of::<T>() == 0 {
             target = isize::MAX as usize;
         }
 
         let layout = Self::layout(target);
-        let ptr = if !self.is_allocated() {
+        let allocation = if !self.is_allocated() {
             // Safety:
             // The layout has non-zero size because `target > 0`.
             alloc::alloc::alloc(layout)
@@ -533,47 +533,54 @@ impl<T> EcoVec<T> {
             //   and rounded up to the nearest multiple of `Self::align()`
             //   does not overflow `isize::MAX`.
             alloc::alloc::realloc(
-                self.ptr.as_ptr() as *mut u8,
+                self.allocation(),
                 Self::layout(self.capacity()),
                 Self::size(target),
             )
         };
 
-        // If non-null the pointer points to a valid allocation.
-        self.ptr = NonNull::new(ptr as *mut Header)
-            .unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
+        if allocation.is_null() {
+            alloc::alloc::handle_alloc_error(layout);
+        }
+
+        // Construct data pointer by offsetting.
+        //
+        // Safety:
+        // Just checked for null and adding only increases the size.
+        // Well, in theory, it could overflow but T's alignment would need
+        // be crazy for that to happen.
+        self.ptr = NonNull::new_unchecked(allocation.add(Self::offset()));
 
         // Safety:
         // The freshly allocated pointer is valid for a write of the header.
         ptr::write(
-            self.ptr.as_ptr(),
+            allocation.cast::<Header>(),
             Header { refs: AtomicUsize::new(1), capacity: target },
         );
-    }
-
-    /// Extracts a mutable slice containing the entire vector without checking
-    /// the reference count.
-    ///
-    /// May only be called if the reference count is `1`.
-    #[inline]
-    unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [T] {
-        // Safety: See `Self::as_slice()`.
-        core::slice::from_raw_parts_mut(self.data_mut(), self.len)
-    }
-
-    /// A reference to the header.
-    #[inline]
-    fn header(&self) -> &Header {
-        // Safety:
-        // The pointer always points to a valid header, even if the vector is
-        // empty.
-        unsafe { self.ptr.as_ref() }
     }
 
     /// Whether this vector has a backing allocation.
     #[inline]
     fn is_allocated(&self) -> bool {
-        !ptr::eq(self.ptr.as_ptr(), &EMPTY)
+        !ptr::eq(self.ptr.as_ptr(), &SENTINEL as *const Sentinel as *const u8)
+    }
+
+    /// The pointer to the backing allocation.
+    ///
+    /// May only be called if `is_allocated` returns `true`.
+    #[inline]
+    unsafe fn allocation(&mut self) -> *mut u8 {
+        debug_assert!(self.is_allocated());
+        self.ptr.as_ptr().sub(Self::offset())
+    }
+
+    /// A reference to the header.
+    #[inline]
+    fn header(&self) -> Option<&Header> {
+        // Safety:
+        // If the vector is allocated, there is always a valid header.
+        self.is_allocated()
+            .then(|| unsafe { &*self.ptr.as_ptr().sub(Self::offset()).cast::<Header>() })
     }
 
     /// The data pointer.
@@ -582,40 +589,30 @@ impl<T> EcoVec<T> {
     /// reads of `T`.
     #[inline]
     fn data(&self) -> *const T {
-        // When `T` has bigger alignment than the header, the `ptr` may not be
-        // well-aligned. However, then `len` is guaranteed to be `0`, so we can
-        // just hand out a well-aligned dangling pointer.
-        if mem::align_of::<T>() > mem::align_of::<Header>() && !self.is_allocated() {
+        // If sentinel pointer isn't a valid pointer of T, fabricate one.
+        // This only happens if `len == 0`, so a dangling pointer is fine.
+        if mem::align_of::<T>() > mem::align_of::<Sentinel>() && !self.is_allocated() {
             return NonNull::dangling().as_ptr();
         }
 
-        // Safety:
-        // The `ptr` is non-null, well-aligned, and offset by `Self::offset()`
-        // it is valid `len` reads of `T`.
-        unsafe {
-            let ptr = self.ptr.as_ptr() as *const u8;
-            ptr.add(Self::offset()) as *const T
-        }
+        self.ptr.as_ptr().cast::<T>()
     }
 
     /// The data pointer, mutably.
     ///
     /// Returns a pointer that is non-null, well-aligned, and valid for
     /// `capacity` writes of `T`.
+    ///
+    /// May only be called if the reference count is 1.
     #[inline]
-    fn data_mut(&mut self) -> *mut T {
-        // See the explanation above.
-        if mem::align_of::<T>() > mem::align_of::<Header>() && !self.is_allocated() {
+    unsafe fn data_mut(&mut self) -> *mut T {
+        // If sentinel pointer isn't a valid pointer of T, fabricate one.
+        // This only happens if `len == 0`, so a dangling pointer is fine.
+        if mem::align_of::<T>() > mem::align_of::<Sentinel>() && !self.is_allocated() {
             return NonNull::dangling().as_ptr();
         }
 
-        // Safety:
-        // The `ptr` is non-null, well-aligned, and offset by `Self::offset()`
-        // it is valid `capacity` writes of `T`.
-        unsafe {
-            let ptr = self.ptr.as_ptr() as *mut u8;
-            ptr.add(Self::offset()) as *mut T
-        }
+        self.ptr.as_ptr().cast::<T>()
     }
 
     /// The layout of a backing allocation for the given capacity.
@@ -652,6 +649,8 @@ impl<T> EcoVec<T> {
     }
 
     /// The offset of the data in the backing allocation.
+    ///
+    /// `self.ptr` points to the data and `self.ptr - offset` to the header.
     #[inline]
     fn offset() -> usize {
         cmp::max(mem::size_of::<Header>(), Self::align())
@@ -685,13 +684,13 @@ impl<T: Clone> EcoVec<T> {
         }
 
         self.reserve(count);
-
-        // Safety: See `extend_from_slice`.
-        unsafe {
-            for value in iter {
+        for value in iter {
+            // Safety: See `extend_from_slice`.
+            unsafe {
                 ptr::write(self.data_mut().add(self.len), value);
-                self.len += 1;
             }
+
+            self.len += 1;
         }
     }
 
@@ -715,7 +714,6 @@ impl EcoVec<u8> {
 
         self.reserve(bytes.len());
 
-        // Safety: See `extend_from_slice`.
         unsafe {
             // Safety:
             // - The source slice is valid for `bytes.len()` reads.
@@ -728,9 +726,9 @@ impl EcoVec<u8> {
                 self.data_mut().add(self.len),
                 bytes.len(),
             );
-
-            self.len += bytes.len();
         }
+
+        self.len += bytes.len();
     }
 }
 
@@ -751,7 +749,7 @@ impl<T> EcoVec<T> {
     #[inline]
     fn is_unique(&mut self) -> bool {
         // See Arc's is_unique() method.
-        self.header().refs.load(Acquire) == 1
+        self.header().map_or(true, |header| header.refs.load(Acquire) == 1)
     }
 }
 
@@ -759,9 +757,9 @@ impl<T: Clone> Clone for EcoVec<T> {
     #[inline]
     fn clone(&self) -> Self {
         // If the vector has a backing allocation, bump the ref-count.
-        if self.is_allocated() {
+        if let Some(header) = self.header() {
             // See Arc's clone impl for details about memory ordering.
-            let prev = self.header().refs.fetch_add(1, Relaxed);
+            let prev = header.refs.fetch_add(1, Relaxed);
             if prev > isize::MAX as usize {
                 ref_count_overflow();
             }
@@ -773,35 +771,44 @@ impl<T: Clone> Clone for EcoVec<T> {
 
 impl<T> Drop for EcoVec<T> {
     fn drop(&mut self) {
-        // Nothing to do if there is no backing allocation.
-        if !self.is_allocated() {
-            return;
-        }
-
         // Drop our ref-count. If there was more than one vector before
-        // (including this one), we shouldn't deallocate.
-        // See Arc's drop impl for details about memory ordering.
-        if self.header().refs.fetch_sub(1, Release) != 1 {
+        // (including this one), we shouldn't deallocate. Nothing to do if there
+        // is no header and thus no backing allocation. See Arc's drop impl for
+        // details about memory ordering.
+        if self
+            .header()
+            .map_or(true, |header| header.refs.fetch_sub(1, Release) != 1)
+        {
             return;
         }
 
         // See Arc's drop impl for details.
         atomic::fence(Acquire);
 
+        // Ensures that the backing storage is deallocated even if one of the
+        // element drops panics.
+        struct Dealloc(*mut u8, Layout);
+
+        impl Drop for Dealloc {
+            fn drop(&mut self) {
+                // Safety: See below.
+                unsafe {
+                    alloc::alloc::dealloc(self.0, self.1);
+                }
+            }
+        }
+
+        // Safety:
+        // The vector has a header, so `self.allocation()` points to an
+        // allocation with the layout of current capacity.
+        let _dealloc =
+            unsafe { Dealloc(self.allocation(), Self::layout(self.capacity())) };
+
         unsafe {
             // Safety:
-            // No other vector references the backing allocation (just checked)
-            // and given that, `as_mut_slice_unchecked` returns a valid slice of
-            // initialized values.
-            ptr::drop_in_place(self.as_mut_slice_unchecked());
-
-            // Safety:
-            // The vector isn't empty, so `self.ptr` points to an allocation
-            // with the layout of current capacity.
-            alloc::alloc::dealloc(
-                self.ptr.as_ptr() as *mut u8,
-                Self::layout(self.capacity()),
-            );
+            // No other vector references the backing allocation (just checked).
+            // For more details, see `Self::as_slice()`.
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.data_mut(), self.len));
         }
     }
 }
@@ -1120,7 +1127,7 @@ impl<T> Drop for IntoIter<T> {
         // We have unique ownership over the underlying allocation.
         unsafe {
             // Safety:
-            // Set to len before dropping to prevent double dropping in
+            // Set len to zero before dropping to prevent double dropping in
             // EcoVec's drop impl in case of panic.
             self.vec.len = 0;
 

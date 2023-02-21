@@ -1,11 +1,10 @@
+use alloc::borrow::Cow;
+use alloc::string::String;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
-
-use alloc::borrow::Cow;
-use alloc::string::String;
 
 use super::EcoVec;
 
@@ -26,8 +25,8 @@ macro_rules! format_eco {
 
 /// An economical string with inline storage and clone-on-write semantics.
 ///
-/// This type has a size of 16 bytes and is null-pointer optimized (meaning that
-/// [`Option<EcoString>`] also takes 16 bytes). It has 14 bytes of inline
+/// This type has a size of 24 bytes and is null-pointer optimized (meaning that
+/// [`Option<EcoString>`] also takes 24 bytes). It has 14 bytes of inline
 /// storage and starting from 15 bytes it becomes an [`EcoVec<u8>`]. The
 /// internal reference counter of the heap variant is atomic, making this type
 /// [`Sync`] and [`Send`].

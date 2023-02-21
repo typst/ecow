@@ -1,11 +1,10 @@
 // Test with `cargo +nightly miri test` to check sanity!
 
-use core::mem;
-use core::sync::atomic::{AtomicUsize, Ordering::*};
-
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::vec::Vec;
+use core::mem;
+use core::sync::atomic::{AtomicUsize, Ordering::*};
 
 use super::*;
 
@@ -18,6 +17,9 @@ fn v<T>(value: T) -> Box<T> {
 #[test]
 fn test_mem_size() {
     assert_eq!(mem::size_of::<EcoVec<u8>>(), 2 * mem::size_of::<usize>());
+    assert_eq!(mem::size_of::<Option<EcoVec<u8>>>(), 2 * mem::size_of::<usize>());
+    assert_eq!(mem::size_of::<EcoString>(), 24);
+    assert_eq!(mem::size_of::<Option<EcoString>>(), 24);
 }
 
 #[test]
@@ -143,30 +145,6 @@ fn test_vec_remove() {
 }
 
 #[test]
-fn test_vec_more_mutations() {
-    let mut vec: EcoVec<&'static str> =
-        "hello, world! what's going on?".split_whitespace().collect();
-
-    assert_eq!(vec.len(), 5);
-    assert_eq!(vec.capacity(), 8);
-    assert_eq!(vec, ["hello,", "world!", "what's", "going", "on?"]);
-    assert_eq!(vec.pop(), Some("on?"));
-    assert_eq!(vec.len(), 4);
-    assert_eq!(vec.last(), Some(&"going"));
-    assert_eq!(vec.remove(1), "world!");
-    assert_eq!(vec.len(), 3);
-    assert_eq!(vec, ["hello,", "what's", "going"]);
-    assert_eq!(vec[1], "what's");
-    vec.push("where?");
-    vec.insert(1, "wonder!");
-    assert_eq!(vec, ["hello,", "wonder!", "what's", "going", "where?"]);
-    vec.retain(|s| s.starts_with('w'));
-    assert_eq!(vec, ["wonder!", "what's", "where?"]);
-    vec.truncate(1);
-    assert_eq!(vec.last(), vec.first());
-}
-
-#[test]
 fn test_vec_truncate() {
     let mut vec = eco_vec!["ok"; 10];
     vec.truncate(13);
@@ -225,12 +203,56 @@ fn test_vec_zst() {
 fn test_vec_huge_alignment() {
     #[derive(Debug, PartialEq, Clone)]
     #[repr(align(128))]
-    struct Big([u8; 128]);
-    let mut vec = EcoVec::<Big>::new();
-    assert_eq!(vec.len(), 0);
-    assert_eq!(vec.as_slice(), []);
-    vec.push(Big([1; 128]));
-    assert_eq!(vec.as_slice(), [Big([1; 128])]);
+    struct B(&'static str);
+    let mut vec: EcoVec<B> =
+        "hello, world! what's going on?".split_whitespace().map(B).collect();
+
+    assert_eq!(vec.len(), 5);
+    assert_eq!(vec.capacity(), 8);
+    assert_eq!(vec, [B("hello,"), B("world!"), B("what's"), B("going"), B("on?")]);
+    assert_eq!(vec.pop(), Some(B("on?")));
+    assert_eq!(vec.len(), 4);
+    assert_eq!(vec.last(), Some(&B("going")));
+    assert_eq!(vec.remove(1), B("world!"));
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec, [B("hello,"), B("what's"), B("going")]);
+    assert_eq!(vec[1], B("what's"));
+    vec.push(B("where?"));
+    vec.insert(1, B("wonder!"));
+    assert_eq!(vec, [B("hello,"), B("wonder!"), B("what's"), B("going"), B("where?")]);
+    vec.retain(|b| b.0.starts_with('w'));
+    assert_eq!(vec, [B("wonder!"), B("what's"), B("where?")]);
+    vec.truncate(1);
+    assert_eq!(vec.last(), vec.first());
+}
+
+#[test]
+#[should_panic(expected = "dropped the hot potato!")]
+fn test_vec_drop_panic() {
+    #[derive(Clone)]
+    struct Potato;
+    impl Drop for Potato {
+        fn drop(&mut self) {
+            panic!("dropped the hot potato!");
+        }
+    }
+
+    eco_vec![Potato];
+}
+
+#[test]
+#[should_panic(expected = "dropped the hot potato!")]
+fn test_vec_clear_drop_panic() {
+    #[derive(Clone)]
+    struct Potato;
+    impl Drop for Potato {
+        fn drop(&mut self) {
+            panic!("dropped the hot potato!");
+        }
+    }
+
+    let mut vec = eco_vec![Potato];
+    vec.clear();
 }
 
 #[test]
