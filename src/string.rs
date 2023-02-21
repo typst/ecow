@@ -94,10 +94,9 @@ impl EcoString {
         }
     }
 
-    /// Create an instance from an existing string-like type.
+    /// Create an instance from a string slice.
     #[inline]
-    fn from_str_like(string: impl AsRef<str>) -> Self {
-        let string = string.as_ref();
+    fn from_str(string: &str) -> Self {
         let len = string.len();
         let mut buf = [0; LIMIT];
         if let Some(head) = buf.get_mut(..len) {
@@ -468,7 +467,7 @@ impl From<char> for EcoString {
 impl From<&str> for EcoString {
     #[inline]
     fn from(s: &str) -> Self {
-        Self::from_str_like(s)
+        Self::from_str(s)
     }
 }
 
@@ -477,14 +476,14 @@ impl From<String> for EcoString {
     /// the layout.
     #[inline]
     fn from(s: String) -> Self {
-        Self::from_str_like(s)
+        Self::from_str(&s)
     }
 }
 
 impl From<Cow<'_, str>> for EcoString {
     #[inline]
     fn from(s: Cow<str>) -> Self {
-        Self::from_str_like(s)
+        Self::from_str(&s)
     }
 }
 

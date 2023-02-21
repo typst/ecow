@@ -182,7 +182,8 @@ impl<T> EcoVec<T> {
     /// Removes all values from the vector.
     pub fn clear(&mut self) {
         // Nothing to do if it's empty.
-        if self.is_empty() {
+        let len = self.len();
+        if len == 0 {
             return;
         }
 
@@ -200,13 +201,19 @@ impl<T> EcoVec<T> {
         unsafe {
             // Safety:
             // - The vector isn't empty (just checked).
+            // - Set length to zero first in case a drop panics, so we leak
+            //   rather than double dropping.
+            self.header_mut().len = 0;
+
             // - We have unique ownership of the backing allocation, so we can
             //   keep it and clear it. In particular, no other vector can have
-            //   gained shared ownership in the meantime since `is_shared()`,
-            //   since this is the only live vector available for cloning and we
+            //   gained shared ownership in the meantime since `is_unique()`,
+            //   as this is the only live vector available for cloning and we
             //   hold a mutable reference to it.
-            self.header_mut().len = 0;
-            ptr::drop_in_place(self.as_mut_slice_unchecked());
+            // - The pointer returned by `data_mut()` is valid for `capacity`
+            //   writes, we have the invariant `len <= capacity` and thus,
+            //   `data_mut()` is valid for `len` writes.
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.data_mut(), len));
         }
     }
 }
@@ -502,14 +509,14 @@ impl<T: Clone> EcoVec<T> {
                 // - Due to the check above, `prev + slice.len() <= capacity`.
                 // - Thus, `data_mut() + prev + i` is valid for one write.
                 ptr::write(self.data_mut().add(prev + i), value.clone());
-            }
 
-            // Safety:
-            // - The vector has a backing allocation because we reserved space
-            //   for at least one element (slice isn't empty).
-            // - We only increase after writing all values in case `.clone()`
-            //   panics.
-            self.header_mut().len += slice.len();
+                // Safety:
+                // - The vector has a backing allocation because we reserved space
+                //   for at least one element (slice isn't empty).
+                // - We only increase after writing all values in case `.clone()`
+                //   panics.
+                self.header_mut().len += 1;
+            }
         }
     }
 }
@@ -521,6 +528,7 @@ impl<T> EcoVec<T> {
     /// - the reference count is `1`, and
     /// - `target > capacity` (i.e., this methods grows, it doesn't shrink).
     unsafe fn grow(&mut self, mut target: usize) {
+        debug_assert!(self.is_unique());
         debug_assert!(target > self.capacity());
 
         // Maintain the `capacity <= isize::MAX` invariant.
@@ -599,7 +607,7 @@ impl<T> EcoVec<T> {
     /// Whether this vector has a backing allocation.
     #[inline]
     fn is_allocated(&self) -> bool {
-        self.ptr.as_ptr() as *const Header != &EMPTY as *const Header
+        !ptr::eq(self.ptr.as_ptr(), &EMPTY)
     }
 
     /// The data pointer.
@@ -717,9 +725,8 @@ impl<T: Clone> EcoVec<T> {
         unsafe {
             for (i, value) in iter.into_iter().enumerate() {
                 ptr::write(self.data_mut().add(prev + i), value);
+                self.header_mut().len += 1;
             }
-
-            self.header_mut().len += prev;
         }
     }
 

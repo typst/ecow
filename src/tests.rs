@@ -118,7 +118,7 @@ fn test_vec_insert() {
 }
 
 #[test]
-#[should_panic(expected = "index is out bounds (index: 4, len: 0)")]
+#[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
 fn test_vec_insert_fail() {
     EcoVec::from([1, 2, 3]).insert(4, 0);
 }
