@@ -1,15 +1,18 @@
 use core::alloc::Layout;
 use core::borrow::Borrow;
+use core::cell::Cell;
 use core::cmp::{self, Ordering};
 use core::fmt::{self, Debug, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem;
 use core::ops::Deref;
-use core::ptr::{self, NonNull};
-use core::sync::atomic::{self, AtomicUsize, Ordering::*};
+use core::ptr::{self, null, NonNull};
+use core::sync::atomic::AtomicUsize;
 
 use alloc::vec::Vec;
+
+use crate::counter::Counter;
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
@@ -30,6 +33,12 @@ macro_rules! eco_vec {
     (@count $value:expr) => { 1 };
 }
 
+/// Vec with thread-unsafe reference counter
+pub type EcoVecNonAtomic<T> = EcoVecWithRc<T, Cell<usize>>;
+
+/// Vec with thread-safe reference counter
+pub type EcoVec<T> = EcoVecWithRc<T, AtomicUsize>;
+
 /// An economical vector with clone-on-write semantics.
 ///
 /// This type has a size of one word and is null-pointer optimized (meaning that
@@ -37,7 +46,7 @@ macro_rules! eco_vec {
 /// stores a reference count, its length, and its capacity. In contrast to an
 /// [`Arc<Vec<T>>`](std::sync::Arc), this type only requires a single allocation
 /// for both the reference count and the elements. The internal reference
-/// counter is atomic, making this type [`Sync`] and [`Send`].
+/// Rc is atomic, making this type [`Sync`] and [`Send`].
 ///
 /// Note that most mutating methods require [`T: Clone`](Clone) due to
 /// clone-on-write semantics.
@@ -64,7 +73,7 @@ macro_rules! eco_vec {
 /// // `first`, this would clone lazily.
 /// assert_eq!(second.into_iter().collect::<Vec<_>>(), vec![1, 2, 3]);
 /// ```
-pub struct EcoVec<T> {
+pub struct EcoVecWithRc<T, Rc: Counter> {
     /// Must always point to a valid header.
     ///
     /// This may point to the `EMPTY` header if the vector is empty. Then, it is
@@ -78,7 +87,7 @@ pub struct EcoVec<T> {
     /// The `ptr` offset by `Self::offset()` is valid for `len` reads and
     /// `capacity` writes, but if it points to the `EMPTY` header, it may to be
     /// aligned to T's alignment.
-    ptr: NonNull<Header>,
+    ptr: *const Header<Rc>,
     /// For variance.
     phantom: PhantomData<T>,
 }
@@ -87,12 +96,12 @@ pub struct EcoVec<T> {
 ///
 /// This is followed by padding, if necessary, and then the actual data.
 #[derive(Debug)]
-struct Header {
+pub(crate) struct Header<Rc> {
     /// The vector's reference count. Starts at 1 and only drops to zero
     /// when the last vector is dropped.
     ///
     /// Invariant: `refs <= isize::MAX`.
-    refs: AtomicUsize,
+    refs: Rc,
     /// The number of elements in the vector.
     ///
     /// May only be mutated if `refs == 1`.
@@ -108,10 +117,7 @@ struct Header {
     capacity: usize,
 }
 
-/// The header used for a vector without any items.
-static EMPTY: Header = Header { refs: AtomicUsize::new(1), len: 0, capacity: 0 };
-
-impl<T> EcoVec<T> {
+impl<T, Rc: Counter> EcoVecWithRc<T, Rc> {
     /// Create a new, empty vector.
     #[inline]
     pub fn new() -> Self {
@@ -120,9 +126,7 @@ impl<T> EcoVec<T> {
             // The `ptr` may be the `EMPTY` header if the vector is empty. The
             // address of `EMPTY` is naturally aligned to the header's
             // alignment.
-            ptr: unsafe {
-                NonNull::new_unchecked(&EMPTY as *const Header as *mut Header)
-            },
+            ptr: null(),
             phantom: PhantomData,
         }
     }
@@ -152,7 +156,7 @@ impl<T> EcoVec<T> {
     /// The number of elements in the vector.
     #[inline]
     pub fn len(&self) -> usize {
-        self.header().len
+        self.header().map(|h| h.len).unwrap_or(0)
     }
 
     /// How many elements the vector's backing allocation can hold.
@@ -161,7 +165,7 @@ impl<T> EcoVec<T> {
     /// allocate if the reference count is larger than one.
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.header().capacity
+        self.header().map(|h| h.capacity).unwrap_or(0)
     }
 
     /// Extracts a slice containing the entire vector.
@@ -211,7 +215,7 @@ impl<T> EcoVec<T> {
     }
 }
 
-impl<T: Clone> EcoVec<T> {
+impl<T: Clone, Rc: Counter> EcoVecWithRc<T, Rc> {
     /// Create a new vector with `n` copies of `value`.
     pub fn from_elem(value: T, n: usize) -> Self {
         let mut vec = Self::with_capacity(n);
@@ -478,7 +482,6 @@ impl<T: Clone> EcoVec<T> {
                 // - The `target` capacity is greater than the current capacity
                 //   because `additional > 0`.
                 self.grow(target);
-                return;
             }
         }
     }
@@ -514,7 +517,7 @@ impl<T: Clone> EcoVec<T> {
     }
 }
 
-impl<T> EcoVec<T> {
+impl<T, Rc: Counter> EcoVecWithRc<T, Rc> {
     /// Grow the capacity to at least the `target` size.
     ///
     /// May only be called if:
@@ -535,7 +538,8 @@ impl<T> EcoVec<T> {
 
         let len = self.len();
         let layout = Self::layout(target);
-        let ptr = if !self.is_allocated() {
+
+        let ptr: *mut Header<Rc> = if !self.is_allocated() {
             // Safety:
             // The layout has non-zero size because `target > 0`.
             alloc::alloc::alloc(layout)
@@ -547,22 +551,22 @@ impl<T> EcoVec<T> {
             //   and rounded up to the nearest multiple of `Self::align()`
             //   does not overflow `isize::MAX`.
             alloc::alloc::realloc(
-                self.ptr.as_ptr() as *mut u8,
+                self.ptr as *mut u8,
                 Self::layout(self.capacity()),
                 Self::size(target),
             )
-        };
+        } as *mut _;
 
-        // If non-null the pointer points to a valid allocation.
-        self.ptr = NonNull::new(ptr as *mut Header)
-            .unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
+        if ptr.is_null() {
+            alloc::alloc::handle_alloc_error(layout);
+        }
 
         // Safety:
         // The freshly allocated pointer is valid for a write of the header.
-        ptr::write(
-            self.ptr.as_ptr(),
-            Header { refs: AtomicUsize::new(1), len, capacity: target },
-        );
+        ptr::write(ptr, Header { refs: Rc::one(), len, capacity: target });
+
+        // If non-null the pointer points to a valid allocation.
+        self.ptr = ptr as *const _;
     }
 
     /// Extracts a mutable slice containing the entire vector without checking
@@ -577,7 +581,7 @@ impl<T> EcoVec<T> {
 
     /// A reference to the header.
     #[inline]
-    fn header(&self) -> &Header {
+    fn header(&self) -> Option<&Header<Rc>> {
         // Safety:
         // The pointer always points to a valid header, even if the vector is
         // empty.
@@ -590,16 +594,16 @@ impl<T> EcoVec<T> {
     /// - the reference count is `1`, and
     /// - `is_allocated` or `!is_empty`
     #[inline]
-    unsafe fn header_mut(&mut self) -> &mut Header {
+    unsafe fn header_mut(&mut self) -> &mut Header<Rc> {
         // Safety: The pointer always points to a valid header.
         debug_assert!(self.is_allocated());
-        self.ptr.as_mut()
+        &mut *(self.ptr as *mut _)
     }
 
     /// Whether this vector has a backing allocation.
     #[inline]
     fn is_allocated(&self) -> bool {
-        self.ptr.as_ptr() as *const Header != &EMPTY as *const Header
+        !self.ptr.is_null()
     }
 
     /// The data pointer.
@@ -611,7 +615,7 @@ impl<T> EcoVec<T> {
         // When `T` has bigger alignment than the header, the `ptr` may not be
         // well-aligned. However, then `len` is guaranteed to be `0`, so we can
         // just hand out a well-aligned dangling pointer.
-        if mem::align_of::<T>() > mem::align_of::<Header>() && !self.is_allocated() {
+        if mem::align_of::<T>() > mem::align_of::<Header<Rc>>() && !self.is_allocated() {
             return NonNull::dangling().as_ptr();
         }
 
@@ -619,7 +623,7 @@ impl<T> EcoVec<T> {
         // The `ptr` is non-null, well-aligned, and offset by `Self::offset()`
         // it is valid `len` reads of `T`.
         unsafe {
-            let ptr = self.ptr.as_ptr() as *const u8;
+            let ptr = self.ptr as *const u8;
             ptr.add(Self::offset()) as *const T
         }
     }
@@ -631,7 +635,7 @@ impl<T> EcoVec<T> {
     #[inline]
     fn data_mut(&mut self) -> *mut T {
         // See the explanation above.
-        if mem::align_of::<T>() > mem::align_of::<Header>() && !self.is_allocated() {
+        if mem::align_of::<T>() > mem::align_of::<Header<Rc>>() && !self.is_allocated() {
             return NonNull::dangling().as_ptr();
         }
 
@@ -639,7 +643,7 @@ impl<T> EcoVec<T> {
         // The `ptr` is non-null, well-aligned, and offset by `Self::offset()`
         // it is valid `capacity` writes of `T`.
         unsafe {
-            let ptr = self.ptr.as_ptr() as *mut u8;
+            let ptr = self.ptr as *mut u8;
             ptr.add(Self::offset()) as *mut T
         }
     }
@@ -666,7 +670,7 @@ impl<T> EcoVec<T> {
             .and_then(|size| Self::offset().checked_add(size))
             .filter(|&size| {
                 // See `Layout::max_size_for_align` for details.
-                size <= isize::MAX as usize - Self::align() - 1
+                size < isize::MAX as usize - Self::align()
             })
             .unwrap_or_else(|| capacity_overflow())
     }
@@ -674,13 +678,13 @@ impl<T> EcoVec<T> {
     /// The alignment of the backing allocation.
     #[inline]
     fn align() -> usize {
-        cmp::max(mem::align_of::<Header>(), mem::align_of::<T>())
+        cmp::max(mem::align_of::<Header<Rc>>(), mem::align_of::<T>())
     }
 
     /// The offset of the data in the backing allocation.
     #[inline]
     fn offset() -> usize {
-        cmp::max(mem::size_of::<Header>(), Self::align())
+        cmp::max(mem::size_of::<Header<Rc>>(), Self::align())
     }
 
     /// The minimum non-zero capacity.
@@ -698,7 +702,7 @@ impl<T> EcoVec<T> {
     }
 }
 
-impl<T: Clone> EcoVec<T> {
+impl<T: Clone, Rc: Counter> EcoVecWithRc<T, Rc> {
     /// Clones and pushes all elements in a trusted-len iterator to the vector.
     ///
     /// The iterator must produce exactly `count` items.
@@ -733,7 +737,7 @@ impl<T: Clone> EcoVec<T> {
     }
 }
 
-impl EcoVec<u8> {
+impl<Rc: Counter> EcoVecWithRc<u8, Rc> {
     /// Copies from a byte slice.
     #[inline]
     pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
@@ -763,10 +767,10 @@ impl EcoVec<u8> {
 }
 
 // Safety: Works like `Arc`.
-unsafe impl<T: Sync> Sync for EcoVec<T> {}
-unsafe impl<T: Send> Send for EcoVec<T> {}
+unsafe impl<T: Sync> Sync for EcoVecWithRc<T, AtomicUsize> {}
+unsafe impl<T: Send> Send for EcoVecWithRc<T, AtomicUsize> {}
 
-impl<T> EcoVec<T> {
+impl<T, Rc: Counter> EcoVecWithRc<T, Rc> {
     /// Whether no other vector is pointing to the same backing allocation.
     ///
     /// This takes a mutable reference because only callers with ownership or a
@@ -778,28 +782,23 @@ impl<T> EcoVec<T> {
     /// call and any subsequent mutation.
     #[inline]
     fn is_unique(&mut self) -> bool {
-        // See Arc's is_unique() method.
-        self.header().refs.load(Acquire) == 1
+        self.header().map(|h| h.refs.is_one()).unwrap_or(true)
     }
 }
 
-impl<T: Clone> Clone for EcoVec<T> {
+impl<T: Clone, Rc: Counter> Clone for EcoVecWithRc<T, Rc> {
     #[inline]
     fn clone(&self) -> Self {
         // If the vector has a backing allocation, bump the ref-count.
-        if self.is_allocated() {
-            // See Arc's clone impl for details about memory ordering.
-            let prev = self.header().refs.fetch_add(1, Relaxed);
-            if prev > isize::MAX as usize {
-                ref_count_overflow();
-            }
+        if self.header().map(|h| h.refs.incr()).unwrap_or(false) {
+            ref_count_overflow();
         }
 
         Self { ptr: self.ptr, phantom: PhantomData }
     }
 }
 
-impl<T> Drop for EcoVec<T> {
+impl<T, Rc: Counter> Drop for EcoVecWithRc<T, Rc> {
     fn drop(&mut self) {
         // Nothing to do if there is no backing allocation.
         if !self.is_allocated() {
@@ -808,13 +807,9 @@ impl<T> Drop for EcoVec<T> {
 
         // Drop our ref-count. If there was more than one vector before
         // (including this one), we shouldn't deallocate.
-        // See Arc's drop impl for details about memory ordering.
-        if self.header().refs.fetch_sub(1, Release) != 1 {
+        if !self.header().map(|h| h.refs.decr()).unwrap_or(false) {
             return;
         }
-
-        // See Arc's drop impl for details.
-        atomic::fence(Acquire);
 
         unsafe {
             // Safety:
@@ -826,15 +821,12 @@ impl<T> Drop for EcoVec<T> {
             // Safety:
             // The vector isn't empty, so `self.ptr` points to an allocation
             // with the layout of current capacity.
-            alloc::alloc::dealloc(
-                self.ptr.as_ptr() as *mut u8,
-                Self::layout(self.capacity()),
-            );
+            alloc::alloc::dealloc(self.ptr as *mut u8, Self::layout(self.capacity()));
         }
     }
 }
 
-impl<T> Deref for EcoVec<T> {
+impl<T, Rc: Counter> Deref for EcoVecWithRc<T, Rc> {
     type Target = [T];
 
     #[inline]
@@ -843,121 +835,127 @@ impl<T> Deref for EcoVec<T> {
     }
 }
 
-impl<T> Borrow<[T]> for EcoVec<T> {
+impl<T, Rc: Counter> Borrow<[T]> for EcoVecWithRc<T, Rc> {
     #[inline]
     fn borrow(&self) -> &[T] {
         self.as_slice()
     }
 }
 
-impl<T> AsRef<[T]> for EcoVec<T> {
+impl<T, Rc: Counter> AsRef<[T]> for EcoVecWithRc<T, Rc> {
     #[inline]
     fn as_ref(&self) -> &[T] {
         self.as_slice()
     }
 }
 
-impl<T> Default for EcoVec<T> {
+impl<T, Rc: Counter> Default for EcoVecWithRc<T, Rc> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Debug> Debug for EcoVec<T> {
+impl<T: Debug, Rc: Counter> Debug for EcoVecWithRc<T, Rc> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.as_slice().fmt(f)
     }
 }
 
-impl<T: Hash> Hash for EcoVec<T> {
+impl<T: Hash, Rc: Counter> Hash for EcoVecWithRc<T, Rc> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_slice().hash(state);
     }
 }
 
-impl<T: Eq> Eq for EcoVec<T> {}
+impl<T: Eq, Rc: Counter> Eq for EcoVecWithRc<T, Rc> {}
 
-impl<T: PartialEq> PartialEq for EcoVec<T> {
+impl<T: PartialEq, Rc: Counter> PartialEq for EcoVecWithRc<T, Rc> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_slice() == other.as_slice()
     }
 }
 
-impl<T: PartialEq> PartialEq<[T]> for EcoVec<T> {
+impl<T: PartialEq, Rc: Counter> PartialEq<[T]> for EcoVecWithRc<T, Rc> {
     #[inline]
     fn eq(&self, other: &[T]) -> bool {
         self.as_slice() == other
     }
 }
 
-impl<T: PartialEq> PartialEq<&[T]> for EcoVec<T> {
+impl<T: PartialEq, Rc: Counter> PartialEq<&[T]> for EcoVecWithRc<T, Rc> {
     #[inline]
     fn eq(&self, other: &&[T]) -> bool {
         self.as_slice() == *other
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for EcoVec<T> {
+impl<T: PartialEq, const N: usize, Rc: Counter> PartialEq<[T; N]>
+    for EcoVecWithRc<T, Rc>
+{
     #[inline]
     fn eq(&self, other: &[T; N]) -> bool {
         self.as_slice() == other
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<&[T; N]> for EcoVec<T> {
+impl<T: PartialEq, Rc: Counter, const N: usize> PartialEq<&[T; N]>
+    for EcoVecWithRc<T, Rc>
+{
     #[inline]
     fn eq(&self, other: &&[T; N]) -> bool {
         self.as_slice() == *other
     }
 }
 
-impl<T: PartialEq> PartialEq<Vec<T>> for EcoVec<T> {
+impl<T: PartialEq, Rc: Counter> PartialEq<Vec<T>> for EcoVecWithRc<T, Rc> {
     #[inline]
     fn eq(&self, other: &Vec<T>) -> bool {
         self.as_slice() == other
     }
 }
 
-impl<T: PartialEq> PartialEq<EcoVec<T>> for [T] {
+impl<T: PartialEq, Rc: Counter> PartialEq<EcoVecWithRc<T, Rc>> for [T] {
     #[inline]
-    fn eq(&self, other: &EcoVec<T>) -> bool {
+    fn eq(&self, other: &EcoVecWithRc<T, Rc>) -> bool {
         self == other.as_slice()
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<EcoVec<T>> for [T; N] {
+impl<T: PartialEq, Rc: Counter, const N: usize> PartialEq<EcoVecWithRc<T, Rc>>
+    for [T; N]
+{
     #[inline]
-    fn eq(&self, other: &EcoVec<T>) -> bool {
+    fn eq(&self, other: &EcoVecWithRc<T, Rc>) -> bool {
         self == other.as_slice()
     }
 }
 
-impl<T: PartialEq> PartialEq<EcoVec<T>> for Vec<T> {
+impl<T: PartialEq, Rc: Counter> PartialEq<EcoVecWithRc<T, Rc>> for Vec<T> {
     #[inline]
-    fn eq(&self, other: &EcoVec<T>) -> bool {
+    fn eq(&self, other: &EcoVecWithRc<T, Rc>) -> bool {
         self == other.as_slice()
     }
 }
 
-impl<T: Ord> Ord for EcoVec<T> {
+impl<T: Ord, Rc: Counter> Ord for EcoVecWithRc<T, Rc> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
-        self.as_slice().cmp(&other.as_slice())
+        self.as_slice().cmp(other.as_slice())
     }
 }
 
-impl<T: PartialOrd> PartialOrd for EcoVec<T> {
+impl<T: PartialOrd, Rc: Counter> PartialOrd for EcoVecWithRc<T, Rc> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_slice().partial_cmp(&other.as_slice())
+        self.as_slice().partial_cmp(other.as_slice())
     }
 }
 
-impl<T: Clone> From<&[T]> for EcoVec<T> {
+impl<T: Clone, Rc: Counter> From<&[T]> for EcoVecWithRc<T, Rc> {
     fn from(slice: &[T]) -> Self {
         let mut vec = Self::new();
         vec.extend_from_slice(slice);
@@ -965,7 +963,7 @@ impl<T: Clone> From<&[T]> for EcoVec<T> {
     }
 }
 
-impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
+impl<T: Clone, Rc: Counter, const N: usize> From<[T; N]> for EcoVecWithRc<T, Rc> {
     fn from(array: [T; N]) -> Self {
         let mut vec = Self::new();
         unsafe {
@@ -976,7 +974,7 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> From<Vec<T>> for EcoVec<T> {
+impl<T: Clone, Rc: Counter> From<Vec<T>> for EcoVecWithRc<T, Rc> {
     /// This needs to allocate to change the layout.
     fn from(other: Vec<T>) -> Self {
         let mut vec = Self::new();
@@ -988,7 +986,7 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> FromIterator<T> for EcoVec<T> {
+impl<T: Clone, Rc: Counter> FromIterator<T> for EcoVecWithRc<T, Rc> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let hint = iter.size_hint().0;
@@ -998,7 +996,7 @@ impl<T: Clone> FromIterator<T> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> Extend<T> for EcoVec<T> {
+impl<T: Clone, Rc: Counter> Extend<T> for EcoVecWithRc<T, Rc> {
     fn extend<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = T>,
@@ -1014,7 +1012,7 @@ impl<T: Clone> Extend<T> for EcoVec<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a EcoVec<T> {
+impl<'a, T, Rc: Counter> IntoIterator for &'a EcoVecWithRc<T, Rc> {
     type IntoIter = core::slice::Iter<'a, T>;
     type Item = &'a T;
 
@@ -1024,8 +1022,8 @@ impl<'a, T> IntoIterator for &'a EcoVec<T> {
     }
 }
 
-impl<T: Clone> IntoIterator for EcoVec<T> {
-    type IntoIter = IntoIter<T>;
+impl<T: Clone, Rc: Counter> IntoIterator for EcoVecWithRc<T, Rc> {
+    type IntoIter = IntoIter<T, Rc>;
     type Item = T;
 
     #[inline]
@@ -1043,9 +1041,9 @@ impl<T: Clone> IntoIterator for EcoVec<T> {
 ///
 /// If the vector had a reference count of 1, this moves out of the vector,
 /// otherwise it lazily clones.
-pub struct IntoIter<T> {
+pub struct IntoIter<T, Rc: Counter> {
     /// The underlying vector.
-    vec: EcoVec<T>,
+    vec: EcoVecWithRc<T, Rc>,
     /// Whether we have unique ownership over the underlying allocation.
     unique: bool,
     /// How many elements we have already read from the front.
@@ -1060,7 +1058,7 @@ pub struct IntoIter<T> {
     back: usize,
 }
 
-impl<T> IntoIter<T> {
+impl<T, Rc: Counter> IntoIter<T, Rc> {
     /// Returns the remaining items of this iterator as a slice.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
@@ -1078,7 +1076,7 @@ impl<T> IntoIter<T> {
     }
 }
 
-impl<T: Clone> Iterator for IntoIter<T> {
+impl<T: Clone, Rc: Counter> Iterator for IntoIter<T, Rc> {
     type Item = T;
 
     #[inline]
@@ -1114,7 +1112,7 @@ impl<T: Clone> Iterator for IntoIter<T> {
     }
 }
 
-impl<T: Clone> DoubleEndedIterator for IntoIter<T> {
+impl<T: Clone, Rc: Counter> DoubleEndedIterator for IntoIter<T, Rc> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         (self.back > self.front).then(|| {
@@ -1136,9 +1134,9 @@ impl<T: Clone> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
-impl<T: Clone> ExactSizeIterator for IntoIter<T> {}
+impl<T: Clone, Rc: Counter> ExactSizeIterator for IntoIter<T, Rc> {}
 
-impl<T> Drop for IntoIter<T> {
+impl<T, Rc: Counter> Drop for IntoIter<T, Rc> {
     fn drop(&mut self) {
         if self.unique && self.vec.is_allocated() {
             // Safety:
@@ -1165,7 +1163,7 @@ impl<T> Drop for IntoIter<T> {
     }
 }
 
-impl<T: Debug> Debug for IntoIter<T> {
+impl<T: Debug, Rc: Counter> Debug for IntoIter<T, Rc> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_tuple("IntoIter").field(&self.as_slice()).finish()

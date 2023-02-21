@@ -1,13 +1,17 @@
 use core::borrow::Borrow;
+use core::cell::Cell;
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
+use core::sync::atomic::AtomicUsize;
 
 use alloc::borrow::Cow;
 use alloc::string::String;
 
-use super::EcoVec;
+use crate::counter::Counter;
+
+use super::EcoVecWithRc;
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
@@ -24,12 +28,18 @@ macro_rules! format_eco {
     }};
 }
 
+/// String with thread-unsafe reference counter
+pub type EcoStringNonAtomic = EcoStringWithRc<Cell<usize>>;
+
+/// String with thread-unsafe reference counter
+pub type EcoString = EcoStringWithRc<AtomicUsize>;
+
 /// An economical string with inline storage and clone-on-write semantics.
 ///
 /// This type has a size of 16 bytes and is null-pointer optimized (meaning that
 /// [`Option<EcoString>`] also takes 16 bytes). It has 14 bytes of inline
 /// storage and starting from 15 bytes it becomes an [`EcoVec<u8>`]. The
-/// internal reference counter of the heap variant is atomic, making this type
+/// internal reference Rc of the heap variant is atomic, making this type
 /// [`Sync`] and [`Send`].
 ///
 /// # Example
@@ -52,20 +62,33 @@ macro_rules! format_eco {
 /// assert_eq!(third, "Welcome to earth! ");
 /// assert_eq!(big, "Welcome to earth! 🌱");
 /// ```
-#[derive(Clone)]
-pub struct EcoString(Repr);
+pub struct EcoStringWithRc<Rc: Counter>(Repr<Rc>);
+
+impl<Rc: Counter> Clone for EcoStringWithRc<Rc> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 
 /// The internal representation. Either:
 /// - inline when below a certain number of bytes, or
 /// - reference-counted on the heap with clone-on-write semantics.
-#[derive(Clone)]
-enum Repr {
+enum Repr<Rc: Counter> {
     /// Invariant: len <= LIMIT.
     Small {
         buf: [u8; LIMIT],
         len: u8,
     },
-    Large(EcoVec<u8>),
+    Large(EcoVecWithRc<u8, Rc>),
+}
+
+impl<Rc: Counter> Clone for Repr<Rc> {
+    fn clone(&self) -> Self {
+        match self {
+            Repr::Small { buf, len } => Self::Small { buf: *buf, len: *len },
+            Repr::Large(v) => Self::Large(v.clone()),
+        }
+    }
 }
 
 /// The maximum number of bytes that can be stored inline.
@@ -77,7 +100,7 @@ enum Repr {
 /// Must be at least 4 to hold any char.
 pub(crate) const LIMIT: usize = 14;
 
-impl EcoString {
+impl<Rc: Counter> EcoStringWithRc<Rc> {
     /// Create a new, empty string.
     #[inline]
     pub const fn new() -> Self {
@@ -90,7 +113,7 @@ impl EcoString {
         if capacity <= LIMIT {
             Self::new()
         } else {
-            Self(Repr::Large(EcoVec::with_capacity(capacity)))
+            Self(Repr::Large(EcoVecWithRc::with_capacity(capacity)))
         }
     }
 
@@ -133,7 +156,7 @@ impl EcoString {
                 // We have the invariant len <= LIMIT.
                 unsafe { buf.get_unchecked(..usize::from(*len)) }
             }
-            Repr::Large(vec) => &vec,
+            Repr::Large(vec) => vec,
         };
 
         // Safety:
@@ -182,7 +205,7 @@ impl EcoString {
                     // Safety:
                     // We have the invariant `len < LIMIT`.
                     let existing = unsafe { buf.get_unchecked(..prev) };
-                    let mut vec = EcoVec::with_capacity(prev + string.len());
+                    let mut vec = EcoVecWithRc::with_capacity(prev + string.len());
                     vec.extend_from_byte_slice(existing);
                     vec.extend_from_byte_slice(string.as_bytes());
                     self.0 = Repr::Large(vec);
@@ -282,7 +305,7 @@ impl EcoString {
 
         let slice = self.as_bytes();
         let capacity = slice.len().saturating_mul(n);
-        let mut vec = EcoVec::with_capacity(capacity);
+        let mut vec = EcoVecWithRc::with_capacity(capacity);
         for _ in 0..n {
             vec.extend_from_byte_slice(slice);
         }
@@ -291,7 +314,7 @@ impl EcoString {
     }
 }
 
-impl Deref for EcoString {
+impl<Rc: Counter> Deref for EcoStringWithRc<Rc> {
     type Target = str;
 
     #[inline]
@@ -300,100 +323,100 @@ impl Deref for EcoString {
     }
 }
 
-impl Default for EcoString {
+impl<Rc: Counter> Default for EcoStringWithRc<Rc> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Debug for EcoString {
+impl<Rc: Counter> Debug for EcoStringWithRc<Rc> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Debug::fmt(self.as_str(), f)
     }
 }
 
-impl Display for EcoString {
+impl<Rc: Counter> Display for EcoStringWithRc<Rc> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Display::fmt(self.as_str(), f)
     }
 }
 
-impl Eq for EcoString {}
+impl<Rc: Counter> Eq for EcoStringWithRc<Rc> {}
 
-impl PartialEq for EcoString {
+impl<Rc: Counter> PartialEq for EcoStringWithRc<Rc> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_str().eq(other.as_str())
     }
 }
 
-impl PartialEq<str> for EcoString {
+impl<Rc: Counter> PartialEq<str> for EcoStringWithRc<Rc> {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         self.as_str().eq(other)
     }
 }
 
-impl PartialEq<&str> for EcoString {
+impl<Rc: Counter> PartialEq<&str> for EcoStringWithRc<Rc> {
     #[inline]
     fn eq(&self, other: &&str) -> bool {
         self.as_str().eq(*other)
     }
 }
 
-impl PartialEq<String> for EcoString {
+impl<Rc: Counter> PartialEq<String> for EcoStringWithRc<Rc> {
     #[inline]
     fn eq(&self, other: &String) -> bool {
         self.as_str().eq(other)
     }
 }
 
-impl PartialEq<EcoString> for str {
+impl<Rc: Counter> PartialEq<EcoStringWithRc<Rc>> for str {
     #[inline]
-    fn eq(&self, other: &EcoString) -> bool {
+    fn eq(&self, other: &EcoStringWithRc<Rc>) -> bool {
         self.eq(other.as_str())
     }
 }
 
-impl PartialEq<EcoString> for &str {
+impl<Rc: Counter> PartialEq<EcoStringWithRc<Rc>> for &str {
     #[inline]
-    fn eq(&self, other: &EcoString) -> bool {
+    fn eq(&self, other: &EcoStringWithRc<Rc>) -> bool {
         (*self).eq(other.as_str())
     }
 }
 
-impl PartialEq<EcoString> for String {
+impl<Rc: Counter> PartialEq<EcoStringWithRc<Rc>> for String {
     #[inline]
-    fn eq(&self, other: &EcoString) -> bool {
+    fn eq(&self, other: &EcoStringWithRc<Rc>) -> bool {
         self.eq(other.as_str())
     }
 }
 
-impl Ord for EcoString {
+impl<Rc: Counter> Ord for EcoStringWithRc<Rc> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.as_str().cmp(other.as_str())
     }
 }
 
-impl PartialOrd for EcoString {
+impl<Rc: Counter> PartialOrd for EcoStringWithRc<Rc> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_str().partial_cmp(other.as_str())
     }
 }
 
-impl Hash for EcoString {
+impl<Rc: Counter> Hash for EcoStringWithRc<Rc> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
     }
 }
 
-impl Write for EcoString {
+impl<Rc: Counter> Write for EcoStringWithRc<Rc> {
     #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.push_str(s);
@@ -407,7 +430,7 @@ impl Write for EcoString {
     }
 }
 
-impl Add for EcoString {
+impl<Rc: Counter> Add for EcoStringWithRc<Rc> {
     type Output = Self;
 
     #[inline]
@@ -417,14 +440,14 @@ impl Add for EcoString {
     }
 }
 
-impl AddAssign for EcoString {
+impl<Rc: Counter> AddAssign for EcoStringWithRc<Rc> {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
         self.push_str(rhs.as_str());
     }
 }
 
-impl Add<&str> for EcoString {
+impl<Rc: Counter> Add<&str> for EcoStringWithRc<Rc> {
     type Output = Self;
 
     #[inline]
@@ -434,28 +457,28 @@ impl Add<&str> for EcoString {
     }
 }
 
-impl AddAssign<&str> for EcoString {
+impl<Rc: Counter> AddAssign<&str> for EcoStringWithRc<Rc> {
     #[inline]
     fn add_assign(&mut self, rhs: &str) {
         self.push_str(rhs);
     }
 }
 
-impl AsRef<str> for EcoString {
+impl<Rc: Counter> AsRef<str> for EcoStringWithRc<Rc> {
     #[inline]
     fn as_ref(&self) -> &str {
         self
     }
 }
 
-impl Borrow<str> for EcoString {
+impl<Rc: Counter> Borrow<str> for EcoStringWithRc<Rc> {
     #[inline]
     fn borrow(&self) -> &str {
         self
     }
 }
 
-impl From<char> for EcoString {
+impl<Rc: Counter> From<char> for EcoStringWithRc<Rc> {
     #[inline]
     fn from(c: char) -> Self {
         // We maintain `len < LIMIT` because `LIMIT >= 4`.
@@ -465,14 +488,14 @@ impl From<char> for EcoString {
     }
 }
 
-impl From<&str> for EcoString {
+impl<Rc: Counter> From<&str> for EcoStringWithRc<Rc> {
     #[inline]
     fn from(s: &str) -> Self {
         Self::from_str_like(s)
     }
 }
 
-impl From<String> for EcoString {
+impl<Rc: Counter> From<String> for EcoStringWithRc<Rc> {
     /// When the string does not fit inline, this needs to allocate to change
     /// the layout.
     #[inline]
@@ -481,14 +504,14 @@ impl From<String> for EcoString {
     }
 }
 
-impl From<Cow<'_, str>> for EcoString {
+impl<Rc: Counter> From<Cow<'_, str>> for EcoStringWithRc<Rc> {
     #[inline]
     fn from(s: Cow<str>) -> Self {
         Self::from_str_like(s)
     }
 }
 
-impl FromIterator<char> for EcoString {
+impl<Rc: Counter> FromIterator<char> for EcoStringWithRc<Rc> {
     #[inline]
     fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
         let mut s = Self::new();
@@ -499,7 +522,7 @@ impl FromIterator<char> for EcoString {
     }
 }
 
-impl FromIterator<Self> for EcoString {
+impl<Rc: Counter> FromIterator<Self> for EcoStringWithRc<Rc> {
     #[inline]
     fn from_iter<T: IntoIterator<Item = Self>>(iter: T) -> Self {
         let mut s = Self::new();
@@ -510,7 +533,7 @@ impl FromIterator<Self> for EcoString {
     }
 }
 
-impl Extend<char> for EcoString {
+impl<Rc: Counter> Extend<char> for EcoStringWithRc<Rc> {
     #[inline]
     fn extend<T: IntoIterator<Item = char>>(&mut self, iter: T) {
         for c in iter {
@@ -519,17 +542,17 @@ impl Extend<char> for EcoString {
     }
 }
 
-impl From<EcoString> for String {
+impl<Rc: Counter> From<EcoStringWithRc<Rc>> for String {
     /// This needs to allocate to change the layout.
     #[inline]
-    fn from(s: EcoString) -> Self {
+    fn from(s: EcoStringWithRc<Rc>) -> Self {
         s.as_str().into()
     }
 }
 
-impl From<&EcoString> for String {
+impl<Rc: Counter> From<&EcoStringWithRc<Rc>> for String {
     #[inline]
-    fn from(s: &EcoString) -> Self {
+    fn from(s: &EcoStringWithRc<Rc>) -> Self {
         s.as_str().into()
     }
 }

@@ -44,6 +44,7 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
+mod counter;
 mod string;
 mod vec;
 

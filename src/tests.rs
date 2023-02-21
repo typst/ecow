@@ -331,3 +331,10 @@ fn test_str_repeat() {
     assert_eq!(v.repeat(3), "abcabcabc");
     assert_eq!(v.repeat(5), "abcabcabcabcabc");
 }
+
+#[test]
+fn test_send_sync() {
+    fn is_send_sync(_: impl Send + Sync) {}
+    is_send_sync(EcoVec::<u8>::new());
+    is_send_sync(EcoString::new());
+}
