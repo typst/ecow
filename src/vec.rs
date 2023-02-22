@@ -797,8 +797,10 @@ impl<T: Clone> Clone for EcoVec<T> {
         if self.is_allocated() {
             // See Arc's clone impl for details about memory ordering.
             let prev = self.header().refs.fetch_add(1, Relaxed);
+
+            // See Arc's clone impl details about guarding against incredibly degenerate programs
             if prev > isize::MAX as usize {
-                ref_count_overflow();
+                ref_count_overflow::<T>(self.ptr);
             }
         }
 
@@ -1187,7 +1189,10 @@ fn capacity_overflow() -> ! {
 }
 
 #[cold]
-fn ref_count_overflow() -> ! {
+fn ref_count_overflow<T>(ptr: NonNull<Header>) -> ! {
+    // Drop to decrement the ref count to counter the increment in `clone()`
+    drop(EcoVec { ptr, phantom: PhantomData::<T> });
+
     panic!("reference count overflow");
 }
 
