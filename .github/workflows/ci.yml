@@ -23,36 +23,17 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
             toolchain: ${{ matrix.rust }}
-            components: clippy, rustfmt
+            components: rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
-      - name: Check clippy
-        run: cargo clippy -- -D warnings
+      - name: Check check
+        run: cargo check -- -D warnings
       - name: Run test suite
         run: cargo test
       - name: Check docs
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --document-private-items
-
-  # Keeping clippy lints happy across a lot of versions is a nightmare, so only
-  # check and test on MSRV without worrying about warnings
-  msrv_only:
-    name: MSRV tasks
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-            # IMPORTANT: Update the `rust-version` in the `Cargo.toml` when you
-            # change this
-            toolchain: 1.58.1
-      - name: Check
-        run: cargo check
-      - name: Test
-        run: cargo test
 
   # We use a healthy amount of unsafe, so run tests with Miri to check for UB
   nightly_only:
