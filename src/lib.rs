@@ -52,3 +52,8 @@ pub use vec::*;
 
 #[cfg(test)]
 mod tests;
+
+// Run doctests on the README too
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
