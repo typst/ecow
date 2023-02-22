@@ -61,7 +61,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Install MSRV toolchain
+      - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
             toolchain: nightly
