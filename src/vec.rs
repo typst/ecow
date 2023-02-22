@@ -1046,7 +1046,7 @@ impl<T: Clone> IntoIterator for EcoVec<T> {
     }
 }
 
-/// An owned iterater over an [`EcoVec`].
+/// An owned iterator over an [`EcoVec`].
 ///
 /// If the vector had a reference count of 1, this moves out of the vector,
 /// otherwise it lazily clones.
