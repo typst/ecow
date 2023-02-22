@@ -770,8 +770,8 @@ impl EcoVec<u8> {
 }
 
 // Safety: Works like `Arc`.
-unsafe impl<T: Sync> Sync for EcoVec<T> {}
-unsafe impl<T: Send> Send for EcoVec<T> {}
+unsafe impl<T: Sync + Send> Sync for EcoVec<T> {}
+unsafe impl<T: Sync + Send> Send for EcoVec<T> {}
 
 impl<T> EcoVec<T> {
     /// Whether no other vector is pointing to the same backing allocation.
