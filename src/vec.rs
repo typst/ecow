@@ -35,7 +35,7 @@ macro_rules! eco_vec {
 /// This type has a size of one word and is null-pointer optimized (meaning that
 /// [`Option<EcoVec<T>>`] also takes only one word). Within its allocation it
 /// stores a reference count, its length, and its capacity. In contrast to an
-/// [`Arc<Vec<T>>`](std::sync::Arc), this type only requires a single allocation
+/// [`Arc<Vec<T>>`](alloc::sync::Arc), this type only requires a single allocation
 /// for both the reference count and the elements. The internal reference
 /// counter is atomic, making this type [`Sync`] and [`Send`].
 ///
