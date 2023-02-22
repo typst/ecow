@@ -30,13 +30,15 @@ assert_eq!(third, "Welcome to earth! ");
 
 | Type                                        | Details |
 |:--------------------------------------------|:--------|
-| [`Vec<T>`] / [`String`]                     | Normal vectors are a great general purpose data structure. But they have a quite big footprint (3 machine words) and are expensive to clone. The [`EcoVec`] has a bit of overhead for mutation, but is small and cheap to clone. |
+| [`Vec<T>`][vec] / [`String`][string]        | Normal vectors are a great general purpose data structure. But they have a quite big footprint (3 machine words) and are expensive to clone. The [`EcoVec`] has a bit of overhead for mutation, but is small and cheap to clone. |
 | [`Arc<Vec<T>>`][arc] / [`Arc<String>`][arc] | This requires two allocations instead of one and is less convenient to mutate. |
 | [`Arc<[T]>`][arc] / [`Arc<str>`][arc]       | While this only requires one allocation and has an acceptable footprint with 2 machine words, it isn't mutable. |
 | Small vector                                | Different trade-off. Great when `T` is small, but expensive to clone when spilled to the heap. |
-| Small string                                | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`], is efficient to clone even when spilled, and at the same time mutable. |
+| Small string                                | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`][string], is efficient to clone even when spilled, and at the same time mutable. |
 
-[arc]: std::sync::Arc
+[arc]: alloc::sync::Arc
+[string]: alloc::string::String
+[vec]: alloc::vec::Vec
 */
 
 #![no_std]
