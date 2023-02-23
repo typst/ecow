@@ -4,7 +4,8 @@ Compact, clone-on-write vector and string.
 ## Types
 - An [`EcoVec`] is a reference-counted clone-on-write vector. It takes up two
   words of space (= 2 usize) and has the same memory layout as a `&[T]` slice.
-  Within its allocation it stores a reference count and its capacity.
+  Within its allocation, it stores a reference count, its capacity and its
+  elements.
 
 - An [`EcoString`] is a reference-counted clone-on-write string with inline
   storage. It takes up 16 bytes of space. It has 15 bytes of inline storage and
@@ -34,11 +35,6 @@ assert_eq!(third, "Welcome to earth! ");
 | [`Arc<Vec<T>>`][arc] / [`Arc<String>`][arc] | These require two allocations instead of one and are less convenient to mutate. |
 | [`Arc<[T]>`][arc] / [`Arc<str>`][arc]       | While these require only one allocation, they aren't mutable. |
 | Small vector                                | Different trade-off. Great when there are few, small `T`s, but expensive to clone when spilled to the heap. |
-| Small string                                | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`][string], is efficient to clone even when spilled, and at the same time mutable. |
-| [`Vec<T>`][vec] / [`String`][string]        | Normal vectors are a great general purpose data structure. But they have a quite big footprint (3 machine words) and are expensive to clone. The [`EcoVec`] has a bit of overhead for mutation, but is small and cheap to clone. |
-| [`Arc<Vec<T>>`][arc] / [`Arc<String>`][arc] | This requires two allocations instead of one and is less convenient to mutate. |
-| [`Arc<[T]>`][arc] / [`Arc<str>`][arc]       | While this only requires one allocation and has an acceptable footprint with 2 machine words, it isn't mutable. |
-| Small vector                                | Different trade-off. Great when `T` is small, but expensive to clone when spilled to the heap. |
 | Small string                                | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`][string], is efficient to clone even when spilled, and at the same time mutable. |
 
 [arc]: alloc::sync::Arc
