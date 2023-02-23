@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Run weekly to keep Rust toolchain changes fresh
+    - cron: '0 0 * * 1'
+
+jobs:
+  multiple_toolchains:
+    name: Stable and Beta tasks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install ${{ matrix.rust }} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+            toolchain: ${{ matrix.rust }}
+            components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Check check
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check
+      - name: Run test suite
+        run: cargo test
+      - name: Check docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --document-private-items
+
+  # We use a healthy amount of unsafe, so run tests with Miri to check for UB
+  nightly_only:
+    name: Nightly tasks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+            toolchain: nightly
+            components: miri
+      - name: Miri
+        run: cargo miri test

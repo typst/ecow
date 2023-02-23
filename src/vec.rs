@@ -38,7 +38,7 @@ macro_rules! eco_vec {
 /// happen in normal circumstances).
 ///
 /// Within its allocation, an `EcoVec` stores a reference count and its
-/// capacity. In contrast to an [`Arc<Vec<T>>`](std::sync::Arc), it only
+/// capacity. In contrast to an [`Arc<Vec<T>>`](alloc::sync::Arc), it only
 /// requires a single allocation for both the reference count and the elements.
 /// The internal reference counter is atomic, making this type [`Sync`] and
 /// [`Send`].
@@ -733,8 +733,8 @@ impl EcoVec<u8> {
 }
 
 // Safety: Works like `Arc`.
-unsafe impl<T: Sync> Sync for EcoVec<T> {}
-unsafe impl<T: Send> Send for EcoVec<T> {}
+unsafe impl<T: Sync + Send> Sync for EcoVec<T> {}
+unsafe impl<T: Sync + Send> Send for EcoVec<T> {}
 
 impl<T> EcoVec<T> {
     /// Whether no other vector is pointing to the same backing allocation.
@@ -760,8 +760,10 @@ impl<T: Clone> Clone for EcoVec<T> {
         if let Some(header) = self.header() {
             // See Arc's clone impl for details about memory ordering.
             let prev = header.refs.fetch_add(1, Relaxed);
+
+            // See Arc's clone impl details about guarding against incredibly degenerate programs
             if prev > isize::MAX as usize {
-                ref_count_overflow();
+                ref_count_overflow::<T>(self.ptr, self.len);
             }
         }
 
@@ -1018,7 +1020,7 @@ impl<T: Clone> IntoIterator for EcoVec<T> {
     }
 }
 
-/// An owned iterater over an [`EcoVec`].
+/// An owned iterator over an [`EcoVec`].
 ///
 /// If the vector had a reference count of 1, this moves out of the vector,
 /// otherwise it lazily clones.
@@ -1157,7 +1159,9 @@ fn capacity_overflow() -> ! {
 }
 
 #[cold]
-fn ref_count_overflow() -> ! {
+fn ref_count_overflow<T>(ptr: NonNull<u8>, len: usize) -> ! {
+    // Drop to decrement the ref count to counter the increment in `clone()`
+    drop(EcoVec::<T> { ptr, len, phantom: PhantomData });
     panic!("reference count overflow");
 }
 
