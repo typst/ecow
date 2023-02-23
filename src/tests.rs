@@ -7,6 +7,7 @@ use core::mem;
 use core::sync::atomic::{AtomicUsize, Ordering::*};
 
 use super::*;
+use crate::dynamic::LIMIT;
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
 
@@ -16,10 +17,14 @@ fn v<T>(value: T) -> Box<T> {
 
 #[test]
 fn test_mem_size() {
-    assert_eq!(mem::size_of::<EcoVec<u8>>(), 2 * mem::size_of::<usize>());
-    assert_eq!(mem::size_of::<Option<EcoVec<u8>>>(), 2 * mem::size_of::<usize>());
-    assert_eq!(mem::size_of::<EcoString>(), 24);
-    assert_eq!(mem::size_of::<Option<EcoString>>(), 24);
+    let word = mem::size_of::<usize>();
+    assert_eq!(mem::size_of::<EcoVec<u8>>(), 2 * word);
+    assert_eq!(mem::size_of::<Option<EcoVec<u8>>>(), 2 * word);
+
+    if cfg!(target_endian = "little") {
+        assert_eq!(mem::size_of::<EcoString>(), 2 * word);
+        assert_eq!(mem::size_of::<Option<EcoString>>(), 3 * word);
+    }
 }
 
 #[test]
@@ -282,24 +287,24 @@ fn test_str_push() {
     assert_eq!(v.len(), 8);
 
     // Test fully filling the inline storage.
-    v.push_str("efghij");
-    assert_eq!(v.len(), LIMIT);
+    v.push_str("efghijk");
+    assert_eq!(v.len(), 15);
 
     // Test spilling with `push`.
     let mut a = v.clone();
-    assert_eq!(a, "abcd😀efghij");
-    a.push('k');
     assert_eq!(a, "abcd😀efghijk");
-    assert_eq!(a.len(), 15);
+    a.push('l');
+    assert_eq!(a, "abcd😀efghijkl");
+    assert_eq!(a.len(), 16);
 
     // Test spilling with `push_str`.
     let mut b = v.clone();
-    b.push_str("klmn");
+    b.push_str("lmn");
     assert_eq!(b, "abcd😀efghijklmn");
     assert_eq!(b.len(), 18);
 
     // v should be unchanged.
-    assert_eq!(v.len(), LIMIT);
+    assert_eq!(v.len(), 15);
 }
 
 #[test]
@@ -358,4 +363,15 @@ fn test_str_repeat() {
     assert_eq!(v.repeat(0), "");
     assert_eq!(v.repeat(3), "abcabcabc");
     assert_eq!(v.repeat(5), "abcabcabcabcabc");
+}
+
+#[test]
+fn test_str_inline_okay() {
+    assert_eq!(EcoString::inline("hello"), "hello");
+}
+
+#[test]
+#[should_panic(expected = "exceeded inline capacity")]
+fn test_str_inline_capacity_exceeded() {
+    EcoString::inline("this is a pretty long string");
 }

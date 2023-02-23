@@ -2,13 +2,13 @@
 Compact, clone-on-write vector and string.
 
 ## Types
-- An [`EcoVec`] is a reference-counted clone-on-write vector with the same
-  memory layout as  a slice `&[T]`. It takes up two words of space (= 2 usize).
+- An [`EcoVec`] is a reference-counted clone-on-write vector. It takes up two
+  words of space (= 2 usize) and has the same memory layout as a `&[T]` slice.
   Within its allocation it stores a reference count and its capacity.
 
-- An [`EcoString`] is a reference-counted string with inline storage. It takes
-  up 24 bytes of space. It has 14 bytes of inline storage and starting from 15
-  bytes it becomes an [`EcoVec<u8>`].
+- An [`EcoString`] is a reference-counted clone-on-write string with inline
+  storage. It takes up 16 bytes of space. It has 15 bytes of inline storage and
+  starting from 16 bytes it becomes an [`EcoVec<u8>`].
 
 ## Example
 ```
@@ -34,7 +34,7 @@ assert_eq!(third, "Welcome to earth! ");
 | [`Arc<Vec<T>>`][arc] / [`Arc<String>`][arc] | These require two allocations instead of one and are less convenient to mutate. |
 | [`Arc<[T]>`][arc] / [`Arc<str>`][arc]       | While these require only one allocation, they aren't mutable. |
 | Small vector                                | Different trade-off. Great when there are few, small `T`s, but expensive to clone when spilled to the heap. |
-| Other small strings                         | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`], is efficient to clone even when spilled, and at the same time mutable. |
+| Small string                                | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`], is efficient to clone even when spilled, and at the same time mutable. |
 
 [arc]: std::sync::Arc
 */
@@ -44,11 +44,12 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
+mod dynamic;
 mod string;
 mod vec;
 
-pub use string::*;
-pub use vec::*;
+pub use self::string::*;
+pub use self::vec::*;
 
 #[cfg(test)]
 mod tests;

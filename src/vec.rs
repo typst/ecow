@@ -11,6 +11,7 @@ use core::ptr::{self, NonNull};
 use core::sync::atomic::{self, AtomicUsize, Ordering::*};
 
 /// Create a new [`EcoVec`] with the given elements.
+/// ```
 /// # use ecow::eco_vec;
 /// assert_eq!(eco_vec![1; 4], [1; 4]);
 /// assert_eq!(eco_vec![1, 2, 3], [1, 2, 3]);
@@ -90,7 +91,6 @@ pub struct EcoVec<T> {
 ///
 /// This is followed by padding, if necessary, and then the actual data.
 #[derive(Debug)]
-#[repr(align(2))]
 struct Header {
     /// The vector's reference count. Starts at 1 and only drops to zero
     /// when the last vector is dropped.

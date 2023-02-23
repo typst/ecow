@@ -6,7 +6,7 @@ use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
 
-use super::EcoVec;
+use crate::dynamic::{DynamicVec, InlineVec};
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
@@ -25,9 +25,8 @@ macro_rules! format_eco {
 
 /// An economical string with inline storage and clone-on-write semantics.
 ///
-/// This type has a size of 24 bytes and is null-pointer optimized (meaning that
-/// [`Option<EcoString>`] also takes 24 bytes). It has 14 bytes of inline
-/// storage and starting from 15 bytes it becomes an [`EcoVec<u8>`]. The
+/// This type has a size of 16 bytes. It has 15 bytes of inline storage and
+/// starting from 16 bytes it becomes an [`EcoVec<u8>`](super::EcoVec). The
 /// internal reference counter of the heap variant is atomic, making this type
 /// [`Sync`] and [`Send`].
 ///
@@ -51,60 +50,43 @@ macro_rules! format_eco {
 /// assert_eq!(third, "Welcome to earth! ");
 /// assert_eq!(big, "Welcome to earth! 🌱");
 /// ```
-#[derive(Clone)]
-pub struct EcoString(Repr);
-
-/// The internal representation. Either:
-/// - inline when below a certain number of bytes, or
-/// - reference-counted on the heap with clone-on-write semantics.
-#[derive(Clone)]
-enum Repr {
-    /// Invariant: len <= LIMIT.
-    Small {
-        buf: [u8; LIMIT],
-        len: u8,
-    },
-    Large(EcoVec<u8>),
-}
-
-/// The maximum number of bytes that can be stored inline.
 ///
-/// The value is chosen such that an `EcoString` fits exactly into 16 bytes
-/// (which are needed anyway due to the `Arc`s alignment, at least on 64-bit
-/// platforms).
-///
-/// Must be at least 4 to hold any char.
-pub(crate) const LIMIT: usize = 14;
+/// # Note
+/// The above holds true for normal 32-bit or 64-bit little endian systems. On
+/// 64-bit big-endian systems, the type's size increases to 24 bytes and the
+/// amount of inline storage to 23 bytes.
+#[derive(Clone)]
+pub struct EcoString(DynamicVec);
 
 impl EcoString {
     /// Create a new, empty string.
     #[inline]
     pub const fn new() -> Self {
-        Self(Repr::Small { buf: [0; LIMIT], len: 0 })
+        Self(DynamicVec::new())
+    }
+
+    /// Create a new, inline string.
+    ///
+    /// Panics if the string's length exceeds the capacity of the inline
+    /// storage.
+    #[inline]
+    pub const fn inline(string: &str) -> Self {
+        let Ok(inline) = InlineVec::from_slice(string.as_bytes()) else {
+            exceeded_inline_capacity();
+        };
+        Self(DynamicVec::from_inline(inline))
     }
 
     /// Create a new, empty string with the given `capacity`.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        if capacity <= LIMIT {
-            Self::new()
-        } else {
-            Self(Repr::Large(EcoVec::with_capacity(capacity)))
-        }
+        Self(DynamicVec::with_capacity(capacity))
     }
 
     /// Create an instance from a string slice.
     #[inline]
     fn from_str(string: &str) -> Self {
-        let len = string.len();
-        let mut buf = [0; LIMIT];
-        if let Some(head) = buf.get_mut(..len) {
-            // We maintain `len < LIMIT` because `get_mut` succeeded.
-            head.copy_from_slice(string.as_bytes());
-            Self(Repr::Small { buf, len: len as u8 })
-        } else {
-            Self(Repr::Large(string.as_bytes().into()))
-        }
+        Self(DynamicVec::from_slice(string.as_bytes()))
     }
 
     /// Whether the string is empty.
@@ -116,78 +98,33 @@ impl EcoString {
     /// The length of the string in bytes.
     #[inline]
     pub fn len(&self) -> usize {
-        match &self.0 {
-            Repr::Small { len, .. } => usize::from(*len),
-            Repr::Large(string) => string.len(),
-        }
+        self.0.len()
     }
 
     /// A string slice containing the entire string.
     #[inline]
     pub fn as_str(&self) -> &str {
-        let buf = match &self.0 {
-            Repr::Small { buf, len } => {
-                // Safety:
-                // We have the invariant len <= LIMIT.
-                unsafe { buf.get_unchecked(..usize::from(*len)) }
-            }
-            Repr::Large(vec) => vec,
-        };
-
         // Safety:
         // The buffer contents stem from correct UTF-8 sources:
         // - Valid ASCII characters
         // - Other string slices
         // - Chars that were encoded with char::encode_utf8
-        unsafe { core::str::from_utf8_unchecked(buf) }
+        unsafe { core::str::from_utf8_unchecked(self.0.as_slice()) }
     }
 
     /// Append the given character at the end.
     #[inline]
     pub fn push(&mut self, c: char) {
         if c.len_utf8() == 1 {
-            match &mut self.0 {
-                Repr::Small { buf, len } => {
-                    let prev = usize::from(*len);
-                    if let Some(slot) = buf.get_mut(prev) {
-                        // We maintain `len < LIMIT` because `get_mut` succeeded.
-                        *slot = c as u8;
-                        *len += 1;
-                        return;
-                    }
-                }
-                Repr::Large(vec) => {
-                    vec.push(c as u8);
-                    return;
-                }
-            }
+            self.0.push(c as u8);
+        } else {
+            self.push_str(c.encode_utf8(&mut [0; 4]));
         }
-
-        self.push_str(c.encode_utf8(&mut [0; 4]));
     }
 
     /// Append the given string slice at the end.
     pub fn push_str(&mut self, string: &str) {
-        match &mut self.0 {
-            Repr::Small { buf, len } => {
-                let prev = usize::from(*len);
-                let new = prev + string.len();
-                if let Some(segment) = buf.get_mut(prev..new) {
-                    // We maintain `len < LIMIT` because `get_mut` succeeded.
-                    segment.copy_from_slice(string.as_bytes());
-                    *len = new as u8;
-                } else {
-                    // Safety:
-                    // We have the invariant `len < LIMIT`.
-                    let existing = unsafe { buf.get_unchecked(..prev) };
-                    let mut vec = EcoVec::with_capacity(prev + string.len());
-                    vec.extend_from_byte_slice(existing);
-                    vec.extend_from_byte_slice(string.as_bytes());
-                    self.0 = Repr::Large(vec);
-                }
-            }
-            Repr::Large(vec) => vec.extend_from_byte_slice(string.as_bytes()),
-        }
+        self.0.extend_from_slice(string.as_bytes());
     }
 
     /// Remove the last character from the string.
@@ -195,32 +132,18 @@ impl EcoString {
     pub fn pop(&mut self) -> Option<char> {
         let slice = self.as_str();
         let c = slice.chars().rev().next()?;
-        let shrunk = slice.len() - c.len_utf8();
-        match &mut self.0 {
-            Repr::Small { len, .. } => *len = shrunk as u8,
-            Repr::Large(vec) => vec.truncate(shrunk),
-        }
+        self.0.truncate(slice.len() - c.len_utf8());
         Some(c)
     }
 
     /// Clear the string.
     #[inline]
     pub fn clear(&mut self) {
-        match &mut self.0 {
-            Repr::Small { len, .. } => *len = 0,
-            Repr::Large(vec) => vec.clear(),
-        }
+        self.0.clear();
     }
 
     /// Convert the string to lowercase.
     pub fn to_lowercase(&self) -> Self {
-        if let Repr::Small { mut buf, len } = self.0 {
-            if self.is_ascii() {
-                buf[..usize::from(len)].make_ascii_lowercase();
-                return Self(Repr::Small { buf, len });
-            }
-        }
-
         let str = self.as_str();
         let mut lower = Self::with_capacity(str.len());
         for c in str.chars() {
@@ -228,24 +151,15 @@ impl EcoString {
             if c == 'Σ' {
                 return str.to_lowercase().into();
             }
-
             for v in c.to_lowercase() {
                 lower.push(v);
             }
         }
-
         lower
     }
 
     /// Convert the string to uppercase.
     pub fn to_uppercase(&self) -> Self {
-        if let Repr::Small { mut buf, len } = self.0 {
-            if self.is_ascii() {
-                buf[..usize::from(len)].make_ascii_uppercase();
-                return Self(Repr::Small { buf, len });
-            }
-        }
-
         let str = self.as_str();
         let mut upper = Self::with_capacity(str.len());
         for c in str.chars() {
@@ -253,39 +167,18 @@ impl EcoString {
                 upper.push(v);
             }
         }
-
         upper
     }
 
     /// Repeat this string `n` times.
     pub fn repeat(&self, n: usize) -> Self {
-        if n == 0 {
-            return Self::new();
-        }
-
-        if let Repr::Small { buf, len } = self.0 {
-            let prev = usize::from(len);
-            let new = prev.saturating_mul(n);
-            if new <= LIMIT {
-                let src = &buf[..prev];
-                let mut buf = [0; LIMIT];
-                for i in 0..n {
-                    buf[prev * i..prev * (i + 1)].copy_from_slice(src);
-                }
-
-                // We maintain `len < LIMIT` because of the check above.
-                return Self(Repr::Small { buf, len: new as u8 });
-            }
-        }
-
         let slice = self.as_bytes();
         let capacity = slice.len().saturating_mul(n);
-        let mut vec = EcoVec::with_capacity(capacity);
+        let mut vec = DynamicVec::with_capacity(capacity);
         for _ in 0..n {
-            vec.extend_from_byte_slice(slice);
+            vec.extend_from_slice(slice);
         }
-
-        Self(Repr::Large(vec))
+        Self(vec)
     }
 }
 
@@ -456,10 +349,7 @@ impl Borrow<str> for EcoString {
 impl From<char> for EcoString {
     #[inline]
     fn from(c: char) -> Self {
-        // We maintain `len < LIMIT` because `LIMIT >= 4`.
-        let mut buf = [0; LIMIT];
-        let len = c.encode_utf8(&mut buf).len();
-        Self(Repr::Small { buf, len: len as u8 })
+        Self::inline(c.encode_utf8(&mut [0; 4]))
     }
 }
 
@@ -530,4 +420,9 @@ impl From<&EcoString> for String {
     fn from(s: &EcoString) -> Self {
         s.as_str().into()
     }
+}
+
+#[cold]
+const fn exceeded_inline_capacity() -> ! {
+    panic!("exceeded inline capacity");
 }
