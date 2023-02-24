@@ -8,7 +8,8 @@ use core::marker::PhantomData;
 use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
-use core::sync::atomic::{self, AtomicUsize, Ordering::*};
+
+use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```

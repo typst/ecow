@@ -8,3 +8,6 @@ keywords = ["string", "vector", "vec", "SSO", "inline", "CoW"]
 description = """
 Compact, clone-on-write vector and string.
 """
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.5"

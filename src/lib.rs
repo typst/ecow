@@ -49,6 +49,7 @@ extern crate alloc;
 
 mod dynamic;
 mod string;
+mod sync;
 mod vec;
 
 pub use self::string::*;
