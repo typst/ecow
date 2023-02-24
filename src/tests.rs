@@ -22,8 +22,16 @@ fn test_mem_size() {
     assert_eq!(mem::size_of::<Option<EcoVec<u8>>>(), 2 * word);
 
     if cfg!(target_endian = "little") {
-        assert_eq!(mem::size_of::<EcoString>(), 2 * word);
-        assert_eq!(mem::size_of::<Option<EcoString>>(), 3 * word);
+        if cfg!(target_pointer_width = "32") {
+            // Inline length still should be reasonable on 32-bit systems
+            assert_eq!(mem::size_of::<EcoString>(), 4 * word);
+            // No niche :(
+            assert_eq!(mem::size_of::<Option<EcoString>>(), 5 * word);
+        } else if cfg!(target_pointer_width = "64") {
+            assert_eq!(mem::size_of::<EcoString>(), 2 * word);
+            // No niche :(
+            assert_eq!(mem::size_of::<Option<EcoString>>(), 3 * word);
+        }
     }
 }
 
