@@ -49,5 +49,9 @@ jobs:
         with:
             toolchain: nightly
             components: miri
-      - name: Miri
-        run: cargo miri test
+      - name: Miri 64-bit LE
+        run: cargo miri test --target x86_64-unknown-linux-gnu
+      - name: Miri 64-bit BE
+        run: cargo miri test --target sparc64-unknown-linux-gnu
+      - name: Miri 32-bit LE
+        run: cargo miri test --target i686-unknown-linux-gnu
