@@ -63,7 +63,7 @@ mod tests;
 pub struct ReadmeDoctests;
 
 /// Loom needs its own syncronization types to be used in order to work
-pub mod sync {
+mod sync {
     /// Atomics stub
     pub mod atomic {
         #[cfg(not(loom))]
