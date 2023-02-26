@@ -1,5 +1,4 @@
-//! Loom needs its own syncronization types to be used in order to work
-
+/// Loom needs its own syncronization types to be used in order to work
 pub mod atomic {
     #[cfg(not(loom))]
     pub use core::sync::atomic::*;
