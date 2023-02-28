@@ -1,3 +1,5 @@
+use ecow::{eco_vec, EcoVec};
+
 // Guarding against something like:
 // https://github.com/servo/rust-smallvec/issues/96 aka RUSTSEC-2018-0003
 // If length isn't updated defensively then a panic when iterating could double-free a value
