@@ -1,5 +1,5 @@
-//! [`EcoString`]: a clone-on-write small-string-optimized reference
-//! counted [`String`][alloc::string::String]
+//! A clone-on-write, small-string-optimized alternative to
+//! [`String`][alloc::string::String]
 
 use alloc::borrow::Cow;
 use alloc::string::String;
@@ -63,12 +63,12 @@ pub struct EcoString(DynamicVec);
 
 impl EcoString {
     /// Maximum number of bytes for an inline `EcoString` before spilling on
-    /// the heap
+    /// the heap.
     ///
-    /// The exact value for this is architecture dependent
+    /// The exact value for this is architecture dependent.
     ///
     /// # Note
-    /// This value is semver exempt and can be changed with any update
+    /// This value is semver exempt and can be changed with any update.
     pub const INLINE_LIMIT: usize = crate::dynamic::LIMIT;
 
     /// Create a new, empty string.

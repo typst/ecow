@@ -1,5 +1,4 @@
-//! Contains [`EcoVec`], a copy-on-write reference counted
-//! [`Vec`][alloc::vec::Vec], and related structs
+//! A clone-on-write alternative to [`Vec`][alloc::vec::Vec]
 
 use alloc::vec::Vec;
 use core::alloc::Layout;
