@@ -1,3 +1,6 @@
+//! A clone-on-write, small-string-optimized alternative to
+//! [`String`][alloc::string::String]
+
 use alloc::borrow::Cow;
 use alloc::string::String;
 use core::borrow::Borrow;
@@ -10,11 +13,11 @@ use crate::dynamic::{DynamicVec, InlineVec};
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
-/// # use ecow::format_eco;
-/// assert_eq!(format_eco!("Hello, {}!", 123), "Hello, 123!");
+/// # use ecow::eco_format;
+/// assert_eq!(eco_format!("Hello, {}!", 123), "Hello, 123!");
 /// ```
 #[macro_export]
-macro_rules! format_eco {
+macro_rules! eco_format {
     ($($tts:tt)*) => {{
         use ::std::fmt::Write;
         let mut s = $crate::EcoString::new();
@@ -59,6 +62,15 @@ macro_rules! format_eco {
 pub struct EcoString(DynamicVec);
 
 impl EcoString {
+    /// Maximum number of bytes for an inline `EcoString` before spilling on
+    /// the heap.
+    ///
+    /// The exact value for this is architecture dependent.
+    ///
+    /// # Note
+    /// This value is semver exempt and can be changed with any update.
+    pub const INLINE_LIMIT: usize = crate::dynamic::LIMIT;
+
     /// Create a new, empty string.
     #[inline]
     pub const fn new() -> Self {
