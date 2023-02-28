@@ -13,8 +13,8 @@ use crate::dynamic::{DynamicVec, InlineVec};
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
-/// # use ecow::format_eco;
-/// assert_eq!(format_eco!("Hello, {}!", 123), "Hello, 123!");
+/// # use ecow::eco_format;
+/// assert_eq!(eco_format!("Hello, {}!", 123), "Hello, 123!");
 /// ```
 #[macro_export]
 macro_rules! eco_format {
