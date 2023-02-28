@@ -1,15 +1,17 @@
 // Test with `cargo +nightly miri test` to check sanity!
 
+extern crate alloc;
+
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::mem;
 use core::sync::atomic::{AtomicUsize, Ordering::*};
 
-use super::*;
-use crate::dynamic::LIMIT;
+use ecow::{eco_vec, EcoString, EcoVec};
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
+const LIMIT: usize = EcoString::INLINE_LIMIT;
 
 fn v<T>(value: T) -> Box<T> {
     Box::new(value)
@@ -169,7 +171,7 @@ fn test_vec_truncate() {
 fn test_vec_extend() {
     let mut vec = EcoVec::new();
     vec.extend_from_slice(&[]);
-    vec.extend_from_byte_slice(&[2, 3, 4]);
+    vec.extend_from_slice(&[2, 3, 4]);
     assert_eq!(vec, [2, 3, 4]);
 }
 

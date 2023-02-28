@@ -54,9 +54,6 @@ pub mod vec;
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;
 
-#[cfg(test)]
-mod tests;
-
 // Run doctests on the README too
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
