@@ -48,11 +48,11 @@ assert_eq!(third, "Welcome to earth! ");
 extern crate alloc;
 
 mod dynamic;
-mod string;
-mod vec;
+pub mod string;
+pub mod vec;
 
-pub use self::string::*;
-pub use self::vec::*;
+pub use self::string::EcoString;
+pub use self::vec::EcoVec;
 
 #[cfg(test)]
 mod tests;

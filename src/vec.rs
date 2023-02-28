@@ -1,3 +1,6 @@
+//! Contains [`EcoVec`], a copy-on-write reference counted
+//! [`Vec`][alloc::vec::Vec], and related structs
+
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::borrow::Borrow;
