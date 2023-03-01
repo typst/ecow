@@ -2,11 +2,14 @@
 
 extern crate alloc;
 
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::mem;
 use core::sync::atomic::{AtomicUsize, Ordering::*};
+use std::collections::HashMap;
+use std::fmt::Write;
 
 use ecow::{eco_vec, EcoString, EcoVec};
 
@@ -43,6 +46,12 @@ fn test_vec_macro() {
 }
 
 #[test]
+fn vec_construction() {
+    assert_eq!(EcoVec::<()>::default(), &[]);
+    assert_eq!(EcoVec::from(vec![(); 100]), vec![(); 100]);
+}
+
+#[test]
 fn test_vec_with_capacity() {
     let mut vec = EcoVec::with_capacity(3);
     assert_eq!(vec.capacity(), 3);
@@ -70,6 +79,8 @@ fn test_vec_empty() {
     assert!(!first.is_empty());
     assert_eq!(first.len(), 1);
     let second = first.clone();
+    first.clear();
+    assert!(first.is_empty());
     first.clear();
     assert!(first.is_empty());
     assert_eq!(second.len(), 1);
@@ -160,11 +171,21 @@ fn test_vec_remove() {
 }
 
 #[test]
+#[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
+fn vec_remove_fail() {
+    EcoVec::from([1, 2, 3]).remove(4);
+}
+
+#[test]
 fn test_vec_truncate() {
     let mut vec = eco_vec!["ok"; 10];
     vec.truncate(13);
     vec.truncate(3);
-    assert_eq!(vec, ["ok"; 3])
+    assert_eq!(vec, ["ok"; 3]);
+
+    let mut cloned = vec.clone();
+    cloned.truncate(2);
+    assert_eq!(cloned, ["ok"; 2]);
 }
 
 #[test]
@@ -239,6 +260,9 @@ fn test_vec_huge_alignment() {
     assert_eq!(vec, [B("wonder!"), B("what's"), B("where?")]);
     vec.truncate(1);
     assert_eq!(vec.last(), vec.first());
+
+    let empty: EcoVec<B> = EcoVec::new();
+    assert_eq!(empty, &[]);
 }
 
 #[test]
@@ -384,4 +408,84 @@ fn test_str_inline_okay() {
 #[should_panic(expected = "exceeded inline capacity")]
 fn test_str_inline_capacity_exceeded() {
     EcoString::inline("this is a pretty long string");
+}
+
+#[test]
+fn str_clear() {
+    let mut inline_clear = EcoString::from("foo");
+    inline_clear.clear();
+    assert_eq!(inline_clear, "");
+
+    let mut spilled_clear: EcoString = std::iter::repeat('a').take(100).collect();
+    let cloned = spilled_clear.clone();
+    spilled_clear.clear();
+    assert_eq!(spilled_clear, "");
+    assert_eq!(cloned.len(), 100);
+}
+
+#[test]
+fn str_construction() {
+    let from_cow = EcoString::from(Cow::Borrowed("foo"));
+    let from_char_iter: EcoString = "foo".chars().collect();
+    let from_eco_string_iter: EcoString =
+        [EcoString::from("f"), EcoString::from("oo")].into_iter().collect();
+
+    assert_eq!(from_cow, from_char_iter);
+    assert_eq!(from_char_iter, from_eco_string_iter);
+    assert_eq!(from_eco_string_iter, "foo");
+
+    let str_from_eco_string_ref = String::from(&from_cow);
+    let str_from_eco_string = String::from(from_cow);
+
+    assert_eq!(str_from_eco_string, str_from_eco_string_ref);
+    assert_eq!(str_from_eco_string_ref, "foo");
+}
+
+#[test]
+fn str_extend() {
+    let mut s = EcoString::from("Hello, ");
+    s.extend("world!".chars());
+
+    assert_eq!(s, "Hello, world!");
+}
+
+#[test]
+fn str_add() {
+    let hello = EcoString::from("Hello, ");
+    let world = EcoString::from("world!");
+
+    let add = hello.clone() + world.clone();
+    let mut add_assign = hello.clone();
+    add_assign += world;
+
+    assert_eq!(add, add_assign);
+    assert_eq!(add, "Hello, world!");
+
+    let add_str = hello.clone() + "world!";
+    let mut add_assign_str = hello.clone();
+    add_assign_str += "world!";
+
+    assert_eq!(add_str, add_assign_str);
+    assert_eq!(add_str, "Hello, world!");
+}
+
+#[test]
+fn complex() {
+    let mut foo = EcoString::default();
+    foo.write_char('f').unwrap();
+    foo.write_str("oo").unwrap();
+
+    let bar = EcoString::from("bar");
+
+    let mut hash_map: HashMap<_, EcoVec<_>> = [
+        (foo.clone(), eco_vec![foo.clone(), bar.clone(), foo]),
+        (bar.clone(), eco_vec![bar; 1]),
+    ]
+    .into_iter()
+    .collect();
+
+    hash_map.get_mut("foo").unwrap().make_mut().sort();
+
+    assert_eq!(hash_map.get("foo").unwrap(), &["bar".into(), "foo".into(), "foo".into()]);
+    assert_eq!(hash_map.get("bar").unwrap(), &["bar".into()]);
 }
