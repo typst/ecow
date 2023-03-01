@@ -1,5 +1,5 @@
 //! A clone-on-write, small-string-optimized alternative to
-//! [`String`][alloc::string::String]
+//! [`String`][alloc::string::String].
 
 use alloc::borrow::Cow;
 use alloc::string::String;

@@ -2,7 +2,8 @@ use ecow::{eco_vec, EcoVec};
 
 // Guarding against something like:
 // https://github.com/servo/rust-smallvec/issues/96 aka RUSTSEC-2018-0003
-// If length isn't updated defensively then a panic when iterating could double-free a value
+// If length isn't updated defensively then a panic when iterating could
+// double-free a value.
 #[test]
 #[should_panic(expected = "Panic on next")]
 fn panicky_iterator_unwinds_correctly() {
@@ -26,7 +27,7 @@ fn panicky_iterator_unwinds_correctly() {
 
 // Guarding against something like:
 // https://github.com/servo/rust-smallvec/issues/252 aka RUSTSEC-2021-0003
-// size_hint should only be treated as a hint, nothing more
+// size_hint should only be treated as a hint, nothing more.
 #[test]
 fn small_size_hint_is_fine() {
     let mut v = EcoVec::new();
@@ -47,7 +48,7 @@ fn small_size_hint_is_fine() {
 
 // Guarding against something like:
 // https://github.com/Alexhuszagh/rust-stackvector/issues/2 aka RUSTSEC-2021-0048
-// size_hint should only be treated as a hint, nothing more
+// size_hint should only be treated as a hint, nothing more.
 #[test]
 fn wacky_size_hint_is_fine() {
     struct IncorrectIterator(core::iter::Take<core::iter::Repeat<u8>>);

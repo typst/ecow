@@ -1,4 +1,4 @@
-//! A clone-on-write alternative to [`Vec`][alloc::vec::Vec]
+//! A clone-on-write alternative to [`Vec`][alloc::vec::Vec].
 
 use alloc::vec::Vec;
 use core::alloc::Layout;

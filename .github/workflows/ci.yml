@@ -39,7 +39,7 @@ jobs:
       - name: Run loom tests
         env:
           RUSTFLAGS: --cfg loom
-        run: cargo test --release loom
+        run: cargo test --release loom --features loom
 
   # We use a healthy amount of unsafe, so run tests with Miri to check for UB
   nightly_only:

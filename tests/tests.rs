@@ -1,15 +1,10 @@
 // Test with `cargo +nightly miri test` to check sanity!
 
-extern crate alloc;
-
-use alloc::borrow::Cow;
-use alloc::boxed::Box;
-use alloc::string::ToString;
-use alloc::vec::Vec;
-use core::mem;
-use core::sync::atomic::{AtomicUsize, Ordering::*};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::mem;
+use std::sync::atomic::{AtomicUsize, Ordering::*};
 
 use ecow::{eco_vec, EcoString, EcoVec};
 
@@ -42,11 +37,11 @@ fn test_mem_size() {
 
 #[test]
 fn test_vec_macro() {
-    assert_eq!(eco_vec![Box::new(1); 3], alloc::vec![v(1); 3]);
+    assert_eq!(eco_vec![Box::new(1); 3], vec![v(1); 3]);
 }
 
 #[test]
-fn vec_construction() {
+fn test_vec_construction() {
     assert_eq!(EcoVec::<()>::default(), &[]);
     assert_eq!(EcoVec::from(vec![(); 100]), vec![(); 100]);
 }
@@ -172,7 +167,7 @@ fn test_vec_remove() {
 
 #[test]
 #[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
-fn vec_remove_fail() {
+fn test_vec_remove_fail() {
     EcoVec::from([1, 2, 3]).remove(4);
 }
 
@@ -411,7 +406,7 @@ fn test_str_inline_capacity_exceeded() {
 }
 
 #[test]
-fn str_clear() {
+fn test_str_clear() {
     let mut inline_clear = EcoString::from("foo");
     inline_clear.clear();
     assert_eq!(inline_clear, "");
@@ -424,7 +419,7 @@ fn str_clear() {
 }
 
 #[test]
-fn str_construction() {
+fn test_str_construction() {
     let from_cow = EcoString::from(Cow::Borrowed("foo"));
     let from_char_iter: EcoString = "foo".chars().collect();
     let from_eco_string_iter: EcoString =
@@ -442,7 +437,7 @@ fn str_construction() {
 }
 
 #[test]
-fn str_extend() {
+fn test_str_extend() {
     let mut s = EcoString::from("Hello, ");
     s.extend("world!".chars());
 
@@ -450,7 +445,7 @@ fn str_extend() {
 }
 
 #[test]
-fn str_add() {
+fn test_str_add() {
     let hello = EcoString::from("Hello, ");
     let world = EcoString::from("world!");
 
@@ -470,7 +465,7 @@ fn str_add() {
 }
 
 #[test]
-fn complex() {
+fn test_str_complex() {
     let mut foo = EcoString::default();
     foo.write_char('f').unwrap();
     foo.write_str("oo").unwrap();
