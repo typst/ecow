@@ -438,3 +438,55 @@ impl From<&EcoString> for String {
 const fn exceeded_inline_capacity() -> ! {
     panic!("exceeded inline capacity");
 }
+
+#[cfg(feature = "serde")]
+mod serde {
+    use crate::EcoString;
+    use core::fmt;
+    use serde::de::{Deserializer, Error, Unexpected, Visitor};
+
+    impl serde::Serialize for EcoString {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            self.as_str().serialize(serializer)
+        }
+    }
+
+    impl<'de> serde::Deserialize<'de> for EcoString {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct EcoStringVisitor;
+
+            impl<'a> Visitor<'a> for EcoStringVisitor {
+                type Value = EcoString;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("a string")
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: Error,
+                {
+                    Ok(EcoString::from(v))
+                }
+
+                fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                where
+                    E: Error,
+                {
+                    if let Ok(utf8) = core::str::from_utf8(v) {
+                        return Ok(EcoString::from(utf8));
+                    }
+                    Err(Error::invalid_value(Unexpected::Bytes(v), &self))
+                }
+            }
+
+            deserializer.deserialize_str(EcoStringVisitor)
+        }
+    }
+}

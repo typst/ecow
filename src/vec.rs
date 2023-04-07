@@ -1172,3 +1172,50 @@ fn ref_count_overflow<T>(ptr: NonNull<u8>, len: usize) -> ! {
 fn out_of_bounds(index: usize, len: usize) -> ! {
     panic!("index is out bounds (index: {index}, len: {len})");
 }
+
+#[cfg(feature = "serde")]
+mod serde {
+    use crate::EcoVec;
+    use core::{fmt, marker::PhantomData};
+    use serde::de::{Deserializer, Visitor};
+
+    impl<T: serde::Serialize> serde::Serialize for EcoVec<T> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            (&self[..]).serialize(serializer)
+        }
+    }
+
+    struct EcoVecVisitor<T>(PhantomData<T>);
+
+    impl<'a, T: serde::Deserialize<'a> + Clone> Visitor<'a> for EcoVecVisitor<T> {
+        type Value = EcoVec<T>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a sequence")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'a>,
+        {
+            let len = seq.size_hint().unwrap_or(0);
+            let mut values = EcoVec::with_capacity(len);
+            while let Some(value) = seq.next_element()? {
+                values.push(value)
+            }
+            Ok(values)
+        }
+    }
+
+    impl<'de, T: serde::Deserialize<'de> + Clone> serde::Deserialize<'de> for EcoVec<T> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_seq(EcoVecVisitor(PhantomData))
+        }
+    }
+}
