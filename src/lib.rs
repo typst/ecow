@@ -47,12 +47,13 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
-mod dynamic;
+pub mod bytes;
 pub mod string;
 pub mod vec;
 
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;
+pub use self::bytes::EcoBytes;
 
 // Run doctests on the README too
 #[doc = include_str!("../README.md")]
