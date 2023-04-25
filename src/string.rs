@@ -10,6 +10,7 @@ use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
 
 use crate::bytes::{EcoBytes, InlineVec};
+use crate::EcoVec;
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
@@ -449,6 +450,40 @@ impl From<&EcoString> for String {
     #[inline]
     fn from(s: &EcoString) -> Self {
         s.as_str().into()
+    }
+}
+
+impl From<EcoString> for EcoBytes {
+    #[inline]
+    fn from(value: EcoString) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<EcoBytes> for EcoString {
+    type Error = core::str::Utf8Error;
+
+    #[inline]
+    fn try_from(value: EcoBytes) -> Result<Self, Self::Error> {
+        core::str::from_utf8(value.as_slice())?;
+        Ok(Self(value))
+    }
+}
+
+impl From<EcoString> for EcoVec<u8> {
+    #[inline]
+    fn from(value: EcoString) -> Self {
+        value.0.into()
+    }
+}
+
+impl TryFrom<EcoVec<u8>> for EcoString {
+    type Error = core::str::Utf8Error;
+
+    #[inline]
+    fn try_from(value: EcoVec<u8>) -> Result<Self, Self::Error> {
+        core::str::from_utf8(value.as_slice())?;
+        Ok(Self(value.into()))
     }
 }
 
