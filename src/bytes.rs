@@ -1,9 +1,13 @@
 //! A clone-on-write, small-vector-optimized alternative to
 //! [`Vec<u8>`][alloc::vec::Vec].
 
+use core::fmt::Debug;
+use core::hash::Hash;
 use core::mem::{self, ManuallyDrop};
 use core::ops::Deref;
 use core::ptr;
+
+use alloc::vec::Vec;
 
 use super::EcoVec;
 
@@ -194,7 +198,7 @@ impl EcoBytes {
             VariantMut::Inline(inline) => {
                 if inline.push(byte).is_err() {
                     let mut eco = EcoVec::with_capacity(inline.len() + 1);
-                    eco.extend_from_byte_slice(self.as_slice());
+                    eco.extend_from_byte_slice(inline.as_slice());
                     eco.push(byte);
                     *self = Self::from(eco);
                 }
@@ -214,6 +218,43 @@ impl EcoBytes {
         match self.variant_mut() {
             VariantMut::Inline(inline) => inline.pop(),
             VariantMut::Spilled(spilled) => spilled.pop(),
+        }
+    }
+
+    /// Inserts a byte at an index within the vector, shifting all bytes
+    /// after it to the right.
+    ///
+    /// Clones the vector if its reference count is larger than 1.
+    ///
+    /// Panics if `index > len`.
+    #[inline]
+    pub fn insert(&mut self, index: usize, value: u8) {
+        match self.variant_mut() {
+            VariantMut::Inline(inline) => {
+                if inline.insert(index, value).is_err() {
+                    let mut eco = EcoVec::with_capacity(inline.len() + 1);
+                    let slice = inline.as_slice();
+                    eco.extend_from_byte_slice(&slice[..index]);
+                    eco.push(value);
+                    eco.extend_from_byte_slice(&slice[index..]);
+                    *self = Self::from(eco);
+                }
+            }
+            VariantMut::Spilled(spilled) => spilled.insert(index, value),
+        }
+    }
+
+    /// Removes and returns the byte at position index within the vector,
+    /// shifting all bytes after it to the left.
+    ///
+    /// Clones the vector if its reference count is larger than 1.
+    ///
+    /// Panics if `index >= len`.
+    #[inline]
+    pub fn remove(&mut self, index: usize) -> u8 {
+        match self.variant_mut() {
+            VariantMut::Inline(inline) => inline.remove(index),
+            VariantMut::Spilled(spilled) => spilled.remove(index),
         }
     }
 
@@ -292,12 +333,109 @@ impl EcoBytes {
     }
 }
 
+impl Default for EcoBytes {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Debug for EcoBytes {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.as_slice().fmt(f)
+    }
+}
+
+impl PartialEq for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for EcoBytes {}
+
+impl Hash for EcoBytes {
+    #[inline]
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
+impl PartialOrd for EcoBytes {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.as_slice().partial_cmp(&other.as_slice())
+    }
+}
+
+impl Ord for EcoBytes {
+    #[inline]
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.as_slice().cmp(&other.as_slice())
+    }
+}
+
 impl Deref for EcoBytes {
     type Target = [u8];
 
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.as_slice()
+    }
+}
+
+impl PartialEq<[u8]> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl PartialEq<&'_ [u8]> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &&[u8]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
+impl<const N: usize> PartialEq<[u8; N]> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &[u8; N]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
+impl<const N: usize> PartialEq<&'_ [u8; N]> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &&[u8; N]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
+impl PartialEq<EcoVec<u8>> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &EcoVec<u8>) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl PartialEq<Vec<u8>> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &Vec<u8>) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl<const N: usize> From<[u8; N]> for EcoBytes {
+    #[inline]
+    fn from(array: [u8; N]) -> Self {
+        if N < LIMIT {
+            Self::from_inline(InlineVec::from_slice(&array).unwrap())
+        } else {
+            Self::from(EcoVec::from(array))
+        }
     }
 }
 
@@ -485,6 +623,31 @@ impl InlineVec {
     }
 
     #[inline]
+    pub fn insert(&mut self, index: usize, value: u8) -> Result<(), ()> {
+        //TODO: optimize?
+        self.push(value)?;
+        let slice = self.as_slice_mut();
+        let len = slice.len();
+        if index >= len {
+            out_of_bounds(index, len - 1)
+        }
+        slice[index..].rotate_right(1);
+        Ok(())
+    }
+
+    #[inline]
+    pub fn remove(&mut self, index: usize) -> u8 {
+        //TODO: optimize?
+        let slice = self.as_slice_mut();
+        let len = slice.len();
+        if index >= len {
+            out_of_bounds(index, len)
+        }
+        slice[index..].rotate_left(1);
+        self.pop().unwrap()
+    }
+
+    #[inline]
     pub fn extend_from_slice(&mut self, bytes: &[u8]) -> Result<(), ()> {
         let len = self.len();
         let grown = len + bytes.len();
@@ -515,4 +678,72 @@ impl InlineVec {
 #[cold]
 const fn exceeded_inline_capacity() -> ! {
     panic!("exceeded inline capacity");
+}
+
+#[cold]
+fn out_of_bounds(index: usize, len: usize) -> ! {
+    panic!("index is out bounds (index: {index}, len: {len})");
+}
+
+#[cfg(feature = "serde")]
+mod serde {
+    use crate::EcoBytes;
+    use core::fmt;
+    use serde::de::{Deserializer, Error, Visitor};
+
+    impl serde::Serialize for EcoBytes {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_bytes(self.as_slice())
+        }
+    }
+
+    impl<'de> serde::Deserialize<'de> for EcoBytes {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct EcoBytesVisitor;
+
+            impl<'a> Visitor<'a> for EcoBytesVisitor {
+                type Value = EcoBytes;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("byte array")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::SeqAccess<'a>,
+                {
+                    let len = seq.size_hint().unwrap_or(0);
+                    let mut bytes = EcoBytes::with_capacity(len);
+
+                    while let Some(b) = seq.next_element()? {
+                        bytes.push(b);
+                    }
+
+                    Ok(bytes)
+                }
+
+                fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                where
+                    E: Error,
+                {
+                    Ok(EcoBytes::from(v))
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: Error,
+                {
+                    Ok(EcoBytes::from(v.as_bytes()))
+                }
+            }
+
+            deserializer.deserialize_str(EcoBytesVisitor)
+        }
+    }
 }

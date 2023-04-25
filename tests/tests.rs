@@ -6,7 +6,7 @@ use std::fmt::Write;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
-use ecow::{eco_vec, EcoString, EcoVec};
+use ecow::{eco_vec, EcoBytes, EcoString, EcoVec};
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
 const LIMIT: usize = EcoString::INLINE_LIMIT;
@@ -483,4 +483,70 @@ fn test_str_complex() {
 
     assert_eq!(hash_map.get("foo").unwrap(), &["bar".into(), "foo".into(), "foo".into()]);
     assert_eq!(hash_map.get("bar").unwrap(), &["bar".into()]);
+}
+
+#[test]
+fn test_bytes_insert() {
+    let mut bytes = EcoBytes::new();
+    for i in 0..5 {
+        bytes.insert(i, (i + 1) as u8);
+        assert_eq!(bytes, [1, 2, 3, 4, 5][..=i]);
+    }
+    bytes.insert(3, 100);
+    assert_eq!(bytes, &[1, 2, 3, 100, 4, 5]);
+    bytes.insert(4, 200);
+    assert_eq!(bytes, &[1, 2, 3, 100, 200, 4, 5]);
+    bytes.insert(7, 250);
+    assert_eq!(bytes, &[1, 2, 3, 100, 200, 4, 5, 250]);
+
+    let mut bytes = EcoBytes::from(EcoVec::new());
+    for i in 0..5 {
+        bytes.insert(i, (i + 1) as u8);
+        assert_eq!(bytes, [1, 2, 3, 4, 5][..=i]);
+    }
+    bytes.insert(3, 100);
+    assert_eq!(bytes, &[1, 2, 3, 100, 4, 5]);
+    bytes.insert(4, 200);
+    assert_eq!(bytes, &[1, 2, 3, 100, 200, 4, 5]);
+    bytes.insert(7, 250);
+    assert_eq!(bytes, &[1, 2, 3, 100, 200, 4, 5, 250]);
+
+    let mut bytes = EcoBytes::new();
+    let mut v = EcoVec::new();
+
+    for i in 0..255 {
+        for j in 0..32 {
+            bytes.insert(j, i);
+            v.insert(j, i);
+            assert_eq!(bytes, v);
+        }
+    }
+}
+
+
+
+#[test]
+#[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
+fn test_bytes_insert_fail() {
+    EcoBytes::from([1, 2, 3]).insert(4, 0);
+}
+
+#[test]
+fn test_bytes_remove() {
+    let mut first = EcoBytes::with_capacity(4);
+    let ptr = first.as_ptr();
+    first.extend_from_slice(&[2, 4, 1]);
+    let second = first.clone();
+    assert_eq!(first.remove(1), 4);
+    assert_eq!(first, [2, 1]);
+    assert_eq!(second, [2, 4, 1]);
+    // Notice these are flipped from the assertions in test_vec_remove!
+    assert_eq!(ptr, first.as_ptr());
+    assert_ne!(ptr, second.as_ptr());
+}
+
+#[test]
+#[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
+fn test_bytes_remove_fail() {
+    EcoBytes::from([1, 2, 3]).remove(4);
 }
