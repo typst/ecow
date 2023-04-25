@@ -51,9 +51,9 @@ pub mod bytes;
 pub mod string;
 pub mod vec;
 
+pub use self::bytes::EcoBytes;
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;
-pub use self::bytes::EcoBytes;
 
 // Run doctests on the README too
 #[doc = include_str!("../README.md")]

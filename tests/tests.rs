@@ -523,8 +523,6 @@ fn test_bytes_insert() {
     }
 }
 
-
-
 #[test]
 #[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
 fn test_bytes_insert_fail() {
