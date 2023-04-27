@@ -78,7 +78,7 @@ impl DynamicVec {
         // Safety:
         // Explicitly set `tagged_len` to 0 to mark this as a spilled variant.
         // Just initializing with `Repr { spilled: ... }` would leave
-        // `tagged_len` unitialized, leading to undefined behaviour on access.
+        // `tagged_len` uninitialized, leading to undefined behaviour on access.
         let mut repr = Repr {
             inline: InlineVec { buf: [0; LIMIT], tagged_len: 0 },
         };

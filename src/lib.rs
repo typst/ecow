@@ -59,7 +59,7 @@ pub use self::vec::EcoVec;
 #[cfg(doctest)]
 pub struct ReadmeDoctests;
 
-/// Loom needs its own syncronization types to be used in order to work
+/// Loom needs its own synchronization types to be used in order to work
 mod sync {
     /// Atomics stub
     pub mod atomic {
