@@ -42,7 +42,7 @@ assert_eq!(third, "Welcome to earth! ");
 [vec]: alloc::vec::Vec
 */
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
 extern crate alloc;

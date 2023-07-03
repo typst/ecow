@@ -1173,6 +1173,26 @@ fn out_of_bounds(index: usize, len: usize) -> ! {
     panic!("index is out bounds (index: {index}, len: {len})");
 }
 
+#[cfg(feature = "std")]
+mod write {
+    use std::io::Write;
+
+    use crate::EcoVec;
+
+    impl Write for EcoVec<u8> {
+        #[inline]
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.extend_from_byte_slice(buf);
+            Ok(buf.len())
+        }
+
+        #[inline]
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+}
+
 #[cfg(feature = "serde")]
 mod serde {
     use crate::EcoVec;
