@@ -750,7 +750,7 @@ impl<T> EcoVec<T> {
     /// uncontrolled cloning is happening in the time between the `is_unique`
     /// call and any subsequent mutation.
     #[inline]
-    fn is_unique(&mut self) -> bool {
+    pub fn is_unique(&mut self) -> bool {
         // See Arc's is_unique() method.
         self.header().map_or(true, |header| header.refs.load(Acquire) == 1)
     }
