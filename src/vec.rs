@@ -111,7 +111,7 @@ struct Header {
 impl<T> EcoVec<T> {
     /// Create a new, empty vector.
     #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             ptr: Self::dangling(),
             len: 0,
@@ -137,13 +137,13 @@ impl<T> EcoVec<T> {
 
     /// Returns `true` if the vector contains no elements.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// The number of elements in the vector.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.len
     }
 
