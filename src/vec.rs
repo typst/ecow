@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::borrow::Borrow;
-use core::cmp::{self, Ordering};
+use core::cmp::Ordering;
 use core::fmt::{self, Debug, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -73,8 +73,7 @@ macro_rules! eco_vec {
 /// ```
 #[repr(C)]
 pub struct EcoVec<T> {
-    /// May point to `SENTINEL` if the vector is empty. Then, it is aligned to
-    /// the sentinel type's alignment.
+    /// Is `Self::danging()` when the vector is unallocated.
     ///
     /// Otherwise, points `Self::offset()` bytes after a valid allocation and
     /// header, to the start of the vector's elements. It is then aligned to the
@@ -109,26 +108,12 @@ struct Header {
     capacity: usize,
 }
 
-/// A type with big alignment used for the address of an unallocated, empty vec.
-#[repr(align(32))]
-struct Sentinel;
-
-/// A value with big alignment whose address if used as a sentinel value for an
-/// unallocated, empty vec.
-///
-/// `EcoVec<T>`'s deref to a slice is a no-op if T's alignment is less than or
-/// equal to this type's alignment. Otherwise it has a check.
-static SENTINEL: Sentinel = Sentinel;
-
 impl<T> EcoVec<T> {
     /// Create a new, empty vector.
     #[inline]
     pub fn new() -> Self {
         Self {
-            // Safety: References are never null.
-            ptr: unsafe {
-                NonNull::new_unchecked(&SENTINEL as *const Sentinel as *mut u8)
-            },
+            ptr: Self::dangling(),
             len: 0,
             phantom: PhantomData,
         }
@@ -553,6 +538,7 @@ impl<T> EcoVec<T> {
         // Well, in theory, it could overflow but T's alignment would need
         // be crazy for that to happen.
         self.ptr = NonNull::new_unchecked(allocation.add(Self::offset()));
+        debug_assert_ne!(self.ptr, Self::dangling());
 
         // Safety:
         // The freshly allocated pointer is valid for a write of the header.
@@ -565,7 +551,7 @@ impl<T> EcoVec<T> {
     /// Whether this vector has a backing allocation.
     #[inline]
     fn is_allocated(&self) -> bool {
-        !ptr::eq(self.ptr.as_ptr(), &SENTINEL as *const Sentinel as *const u8)
+        !ptr::eq(self.ptr.as_ptr(), Self::dangling().as_ptr())
     }
 
     /// The pointer to the backing allocation.
@@ -592,12 +578,6 @@ impl<T> EcoVec<T> {
     /// reads of `T`.
     #[inline]
     fn data(&self) -> *const T {
-        // If sentinel pointer isn't a valid pointer of T, fabricate one.
-        // This only happens if `len == 0`, so a dangling pointer is fine.
-        if mem::align_of::<T>() > mem::align_of::<Sentinel>() && !self.is_allocated() {
-            return NonNull::dangling().as_ptr();
-        }
-
         self.ptr.as_ptr().cast::<T>()
     }
 
@@ -609,12 +589,6 @@ impl<T> EcoVec<T> {
     /// May only be called if the reference count is 1.
     #[inline]
     unsafe fn data_mut(&mut self) -> *mut T {
-        // If sentinel pointer isn't a valid pointer of T, fabricate one.
-        // This only happens if `len == 0`, so a dangling pointer is fine.
-        if mem::align_of::<T>() > mem::align_of::<Sentinel>() && !self.is_allocated() {
-            return NonNull::dangling().as_ptr();
-        }
-
         self.ptr.as_ptr().cast::<T>()
     }
 
@@ -647,16 +621,29 @@ impl<T> EcoVec<T> {
 
     /// The alignment of the backing allocation.
     #[inline]
-    fn align() -> usize {
-        cmp::max(mem::align_of::<Header>(), mem::align_of::<T>())
+    const fn align() -> usize {
+        max(mem::align_of::<Header>(), mem::align_of::<T>())
     }
 
     /// The offset of the data in the backing allocation.
     ///
     /// `self.ptr` points to the data and `self.ptr - offset` to the header.
     #[inline]
-    fn offset() -> usize {
-        cmp::max(mem::size_of::<Header>(), Self::align())
+    const fn offset() -> usize {
+        max(mem::size_of::<Header>(), Self::align())
+    }
+
+    /// The sentinel value of `self.ptr`, used to indicate an uninitialized,
+    /// unallocated vector. It is dangling (does not point at valid memory), but
+    /// is well-aligned, so can be used to create 0-length slices.
+    ///
+    /// All pointers to allocated vector elements will be distinct from this
+    /// value, because allocated vector elements start `Self::offset()` bytes
+    /// into a heap allocation and heap allocations cannot start at 0 (null).
+    #[inline]
+    const fn dangling() -> NonNull<u8> {
+        // Safety: `Self::offset()` is never 0
+        unsafe { NonNull::new_unchecked(Self::offset() as *mut u8) }
     }
 
     /// The minimum non-zero capacity.
@@ -1171,6 +1158,15 @@ fn ref_count_overflow<T>(ptr: NonNull<u8>, len: usize) -> ! {
 #[cold]
 fn out_of_bounds(index: usize, len: usize) -> ! {
     panic!("index is out bounds (index: {index}, len: {len})");
+}
+
+// Copy of `std::cmp::max::<usize>()` that is callable in `const` contexts
+const fn max(x: usize, y: usize) -> usize {
+    if x > y {
+        x
+    } else {
+        y
+    }
 }
 
 #[cfg(feature = "std")]
