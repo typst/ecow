@@ -23,13 +23,7 @@ use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
 macro_rules! eco_vec {
     () => { $crate::EcoVec::new() };
     ($elem:expr; $n:expr) => { $crate::EcoVec::from_elem($elem, $n) };
-    ($($value:expr),+ $(,)?) => {{
-        let capacity = 0 $(+ $crate::eco_vec!(@count $value))*;
-        let mut vec = $crate::EcoVec::with_capacity(capacity);
-        $(vec.push($value);)*
-        vec
-    }};
-    (@count $value:expr) => { 1 };
+    ($($value:expr),+ $(,)?) => { $crate::EcoVec::from([$($value),+]) };
 }
 
 /// An economical vector with clone-on-write semantics.
@@ -214,7 +208,8 @@ impl<T: Clone> EcoVec<T> {
     pub fn from_elem(value: T, n: usize) -> Self {
         let mut vec = Self::with_capacity(n);
         for _ in 0..n {
-            vec.push(value.clone());
+            // Safety: we just called `EcoVec::with_capacity()`
+            unsafe { vec.push_unchecked(value.clone()) }
         }
         vec
     }
@@ -241,12 +236,27 @@ impl<T: Clone> EcoVec<T> {
         // Ensure unique ownership and grow the vector if necessary.
         self.reserve((self.len == self.capacity()) as usize);
 
+        // Safety: we just called `EcoVec::reserve()`
+        unsafe { self.push_unchecked(value) }
+    }
+
+    /// Add a value at the end of the vector, without reallocating.
+    ///
+    /// # Safety
+    /// Caller must ensure that `self.len < self.capacity()` and
+    /// `self.is_unique()` hold, such as by calling `EcoVec::reserve()`, or
+    /// `EcoVec::with_capacity()`.
+    #[inline]
+    unsafe fn push_unchecked(&mut self, value: T) {
+        debug_assert!(self.len < self.capacity());
+        debug_assert!(self.is_unique());
+
         unsafe {
             // Safety:
-            // - The reference count is `1` because of `reserve`.
+            // - Caller must ensure that reference count is `1`.
             // - The pointer returned by `data_mut()` is valid for `capacity`
             //   writes.
-            // - Due to the `reserve` call, `len < capacity`.
+            // - Caller must ensure that `len < capacity`.
             // - Thus, `data_mut() + len` is valid for one write.
             ptr::write(self.data_mut().add(self.len), value);
 
