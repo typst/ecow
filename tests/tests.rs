@@ -1,5 +1,8 @@
 // Test with `cargo +nightly miri test` to check sanity!
 
+#![allow(clippy::redundant_clone)]
+#![allow(clippy::disallowed_names)]
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write;
