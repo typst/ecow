@@ -644,16 +644,26 @@ impl<T> EcoVec<T> {
     }
 
     /// The sentinel value of `self.ptr`, used to indicate an uninitialized,
-    /// unallocated vector. It is dangling (does not point at valid memory), but
-    /// is well-aligned, so can be used to create 0-length slices.
+    /// unallocated vector. It is dangling (does not point to valid memory) and
+    /// has no provenance. As such, it must not be used to read/write/offset.
+    /// However, it is well-aligned, so it can be used to create 0-length
+    /// slices.
     ///
     /// All pointers to allocated vector elements will be distinct from this
     /// value, because allocated vector elements start `Self::offset()` bytes
     /// into a heap allocation and heap allocations cannot start at 0 (null).
     #[inline]
     const fn dangling() -> NonNull<u8> {
-        // Safety: `Self::offset()` is never 0
-        unsafe { NonNull::new_unchecked(Self::offset() as *mut u8) }
+        unsafe {
+            // Safety: This is the stable equivalent of `core::ptr::invalid_mut`.
+            // The pointer we create has no provenance and may not be
+            // read/write/offset.
+            #[allow(clippy::useless_transmute)]
+            let ptr = mem::transmute::<usize, *mut u8>(Self::offset());
+
+            // Safety: `Self::offset()` is never 0.
+            NonNull::new_unchecked(ptr)
+        }
     }
 
     /// The minimum non-zero capacity.
