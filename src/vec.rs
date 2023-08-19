@@ -31,8 +31,7 @@ macro_rules! eco_vec {
 /// This type has the same layout as a slice `&[T]`: It consists of a pointer
 /// and a length. The pointer is null-pointer optimized (meaning that
 ///  [`Option<EcoVec<T>>`] has the same size as `EcoVec<T>`). Dereferencing an
-/// `EcoVec` to a slice is a no-op (unless T has huge alignment, which shouldn't
-/// happen in normal circumstances).
+/// `EcoVec` to a slice is a no-op.
 ///
 /// Within its allocation, an `EcoVec` stores a reference count and its
 /// capacity. In contrast to an [`Arc<Vec<T>>`](alloc::sync::Arc), it only
@@ -237,26 +236,26 @@ impl<T: Clone> EcoVec<T> {
         self.reserve((self.len == self.capacity()) as usize);
 
         // Safety: we just called `EcoVec::reserve()`
-        unsafe { self.push_unchecked(value) }
+        unsafe {
+            self.push_unchecked(value);
+        }
     }
 
     /// Add a value at the end of the vector, without reallocating.
     ///
-    /// # Safety
-    /// Caller must ensure that `self.len < self.capacity()` and
-    /// `self.is_unique()` hold, such as by calling `EcoVec::reserve()`, or
-    /// `EcoVec::with_capacity()`.
+    /// You must ensure that `self.is_unique()` and `self.len < self.capacity()`
+    /// hold, by calling `EcoVec::with_capacity()` or `EcoVec::reserve()`.
     #[inline]
     unsafe fn push_unchecked(&mut self, value: T) {
-        debug_assert!(self.len < self.capacity());
         debug_assert!(self.is_unique());
+        debug_assert!(self.len < self.capacity());
 
         unsafe {
             // Safety:
-            // - Caller must ensure that reference count is `1`.
+            // - The caller must ensure that the reference count is `1`.
             // - The pointer returned by `data_mut()` is valid for `capacity`
             //   writes.
-            // - Caller must ensure that `len < capacity`.
+            // - The caller must ensure that `len < capacity`.
             // - Thus, `data_mut() + len` is valid for one write.
             ptr::write(self.data_mut().add(self.len), value);
 
@@ -479,20 +478,13 @@ impl<T: Clone> EcoVec<T> {
 
         self.reserve(slice.len());
 
-        // Safety:
-        // The reference count is `1` because of `reserve`.
-        unsafe {
-            for value in slice {
-                // Safety:
-                // - The pointer returned by `data_mut()` is valid for
-                //   `capacity` writes.
-                // - Due to the reserve, `start_len + slice.len() <= capacity`.
-                // - Thus, `data_mut() + self.len` is valid for one write.
-                ptr::write(self.data_mut().add(self.len), value.clone());
-
-                // Safety:
-                // We only increase after writing in case `.clone()` panics.
-                self.len += 1;
+        for value in slice {
+            // Safety:
+            // - The reference count is `1` because of `reserve`.
+            // - `self.len < self.capacity()` because we reserved space for
+            //   `slice.len()` more elements.
+            unsafe {
+                self.push_unchecked(value.clone());
             }
         }
     }
@@ -544,9 +536,9 @@ impl<T> EcoVec<T> {
         // Construct data pointer by offsetting.
         //
         // Safety:
-        // Just checked for null and adding only increases the size.
-        // Well, in theory, it could overflow but T's alignment would need
-        // be crazy for that to happen.
+        // Just checked for null and adding only increases the size. Can't
+        // overflow because the `allocation` is a valid pointer to
+        // `Self::size(target)` bytes and `Self::offset() < Self::size(target)`.
         self.ptr = NonNull::new_unchecked(allocation.add(Self::offset()));
         debug_assert_ne!(self.ptr, Self::dangling());
 
@@ -637,7 +629,8 @@ impl<T> EcoVec<T> {
 
     /// The offset of the data in the backing allocation.
     ///
-    /// `self.ptr` points to the data and `self.ptr - offset` to the header.
+    /// Always `> 0`. `self.ptr` points to the data and `self.ptr - offset` to
+    /// the header.
     #[inline]
     const fn offset() -> usize {
         max(mem::size_of::<Header>(), Self::align())
@@ -694,13 +687,15 @@ impl<T: Clone> EcoVec<T> {
         }
 
         self.reserve(count);
-        for value in iter {
-            // Safety: See `extend_from_slice`.
-            unsafe {
-                ptr::write(self.data_mut().add(self.len), value);
-            }
 
-            self.len += 1;
+        for value in iter {
+            // Safety:
+            // - The reference count is `1` because of `reserve`.
+            // - `self.len < self.capacity()` because we reserved space for
+            //   `slice.len()` more elements.
+            unsafe {
+                self.push_unchecked(value);
+            }
         }
     }
 
@@ -1190,22 +1185,16 @@ const fn max(x: usize, y: usize) -> usize {
 }
 
 #[cfg(feature = "std")]
-mod write {
-    use std::io::Write;
+impl std::io::Write for EcoVec<u8> {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.extend_from_byte_slice(buf);
+        Ok(buf.len())
+    }
 
-    use crate::EcoVec;
-
-    impl Write for EcoVec<u8> {
-        #[inline]
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.extend_from_byte_slice(buf);
-            Ok(buf.len())
-        }
-
-        #[inline]
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

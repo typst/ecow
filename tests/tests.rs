@@ -265,6 +265,7 @@ fn test_vec_huge_alignment() {
 
 #[test]
 #[should_panic(expected = "dropped the hot potato!")]
+#[allow(unused_must_use)]
 fn test_vec_drop_panic() {
     #[derive(Clone)]
     struct Potato;
