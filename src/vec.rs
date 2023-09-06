@@ -66,7 +66,7 @@ macro_rules! eco_vec {
 /// ```
 #[repr(C)]
 pub struct EcoVec<T> {
-    /// Is `Self::danging()` when the vector is unallocated.
+    /// Is `Self::dangling()` when the vector is unallocated.
     ///
     /// Otherwise, points `Self::offset()` bytes after a valid allocation and
     /// header, to the start of the vector's elements. It is then aligned to the
@@ -399,8 +399,8 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Shortens the vector, keeping the first len elements and dropping the
-    /// rest.
+    /// Shortens the vector, keeping the first `target` elements and dropping
+    /// the rest.
     ///
     /// Clones the vector if its reference count is larger than 1 and
     /// `target < len`.
