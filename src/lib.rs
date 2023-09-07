@@ -29,17 +29,13 @@ assert_eq!(third, "Welcome to earth! ");
 
 ## Why should I use this instead of ...
 
-| Type                                        | Details |
-|:--------------------------------------------|:--------|
-| [`Vec<T>`][vec] / [`String`][string]        | Normal vectors are a great general purpose data structure. But they have a quite big footprint (3 machine words) and are expensive to clone. The [`EcoVec`] has a bit of overhead for mutation, but is cheap to clone and only takes two words. |
-| [`Arc<Vec<T>>`][arc] / [`Arc<String>`][arc] | These require two allocations instead of one and are less convenient to mutate. |
-| [`Arc<[T]>`][arc] / [`Arc<str>`][arc]       | While these require only one allocation, they aren't mutable. |
-| Small vector                                | Different trade-off. Great when there are few, small `T`s, but expensive to clone when spilled to the heap. |
-| Small string                                | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`][string], is efficient to clone even when spilled, and at the same time mutable. |
-
-[arc]: alloc::sync::Arc
-[string]: alloc::string::String
-[vec]: alloc::vec::Vec
+| Type                              | Details |
+|:----------------------------------|:--------|
+| [`Vec<T>`]/ [`String`]            | Normal vectors are a great general purpose data structure. But they have a quite big footprint (3 machine words) and are expensive to clone. The [`EcoVec`] has a bit of overhead for mutation, but is cheap to clone and only takes two words. |
+| [`Arc<Vec<T>>`] / [`Arc<String>`] | These require two allocations instead of one and are less convenient to mutate. |
+| [`Arc<[T]>`] / [`Arc<str>`]       | While these require only one allocation, they aren't mutable. |
+| Small vector                      | Different trade-off. Great when there are few, small `T`s, but expensive to clone when spilled to the heap. |
+| Small string                      | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`][string], is efficient to clone even when spilled, and at the same time mutable. |
 */
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -47,12 +43,16 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
-mod dynamic;
 pub mod string;
 pub mod vec;
 
+mod dynamic;
+
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;
+
+#[cfg(doc)]
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 // Run doctests on the README too
 #[doc = include_str!("../README.md")]

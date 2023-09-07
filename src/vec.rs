@@ -1,4 +1,4 @@
-//! A clone-on-write alternative to [`Vec`][alloc::vec::Vec].
+//! A clone-on-write alternative to [`Vec`].
 
 use alloc::vec::Vec;
 use core::alloc::Layout;
@@ -956,7 +956,7 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
         let mut vec = Self::new();
         unsafe {
             // Safety: Array's IntoIter implements `TrustedLen`.
-            vec.extend_from_trusted(array.len(), array.into_iter());
+            vec.extend_from_trusted(array.len(), array);
         }
         vec
     }
@@ -968,7 +968,7 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
         let mut vec = Self::new();
         unsafe {
             // Safety: Vec's IntoIter implements `TrustedLen`.
-            vec.extend_from_trusted(other.len(), other.into_iter());
+            vec.extend_from_trusted(other.len(), other);
         }
         vec
     }

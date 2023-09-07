@@ -1,5 +1,4 @@
-//! A clone-on-write, small-string-optimized alternative to
-//! [`String`][alloc::string::String].
+//! A clone-on-write, small-string-optimized alternative to [`String`].
 
 use alloc::borrow::Cow;
 use alloc::string::String;
@@ -143,7 +142,7 @@ impl EcoString {
     #[inline]
     pub fn pop(&mut self) -> Option<char> {
         let slice = self.as_str();
-        let c = slice.chars().rev().next()?;
+        let c = slice.chars().next_back()?;
         self.0.truncate(slice.len() - c.len_utf8());
         Some(c)
     }
