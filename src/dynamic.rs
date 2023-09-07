@@ -247,7 +247,8 @@ pub(crate) struct InlineVec {
 impl InlineVec {
     #[inline]
     pub const fn new() -> Self {
-        Self::from_buf([0; LIMIT], 0)
+        // Safety: Trivially, 0 <= LIMIT
+        unsafe { Self::from_buf([0; LIMIT], 0) }
     }
 
     #[inline]
@@ -264,11 +265,14 @@ impl InlineVec {
             i += 1;
         }
 
-        Ok(Self::from_buf(buf, len))
+        // Safety: If len > LIMIT, Err was returned earlier.
+        unsafe { Ok(Self::from_buf(buf, len)) }
     }
 
+    /// The given length may not exceed LIMIT.
     #[inline]
-    pub const fn from_buf(buf: [u8; LIMIT], len: usize) -> Self {
+    pub const unsafe fn from_buf(buf: [u8; LIMIT], len: usize) -> Self {
+        debug_assert!(len <= LIMIT);
         Self { buf, tagged_len: len as u8 | LEN_TAG }
     }
 
