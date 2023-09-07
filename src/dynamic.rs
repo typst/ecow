@@ -11,7 +11,7 @@ pub(crate) struct DynamicVec(Repr);
 ///
 /// On 64-bit little endian, this assumes that no valid EcoVec exists in which
 /// the highest-order bit of the InlineVec's `tagged_len` would be set. This is
-/// true because EcoVec is repr(C) and it's second field `len` is bounded by
+/// true because EcoVec is repr(C) and its second field `len` is bounded by
 /// `isize::MAX`. On 32-bit, it's no problem and for 64-bit big endian, we
 /// have an increased limit to prevent the overlap.
 #[repr(C)]
@@ -39,7 +39,7 @@ enum VariantMut<'a> {
 /// However, in the rare exotic system, we still want things to be safe.
 /// Therefore, the following special cases:
 /// - For big endian, we increase the limit such that the tagged length of the
-///   inline variants doesn't overlap with the EcoVec. For little endian, its
+///   inline variants doesn't overlap with the EcoVec. For little endian, it's
 ///   fine since the highest order bit is never set for a valid EcoVec.
 /// - In case somehow EcoVec is very big (128-bit pointers woah), increase the
 ///   limit too.
@@ -180,7 +180,7 @@ impl DynamicVec {
         // the inline variant the highest-order bit is always `1`. For the
         // spilled variant, it is initialized with `0` and cannot deviate from
         // that because the EcoVec's `len` field is bounded by `isize::MAX`. (At
-        // least one 64-bit little endian; on 32-bit or big-endian the EcoVec
+        // least on 64-bit little endian; on 32-bit or big-endian the EcoVec
         // and tagged_len fields don't even overlap, meaning tagged_len stays at
         // its initial value.)
         unsafe { self.0.inline.tagged_len & LEN_TAG != 0 }
@@ -333,7 +333,7 @@ impl InlineVec {
     pub fn truncate(&mut self, target: usize) {
         if target < self.len() {
             unsafe {
-                // Safety: Jecked that it's smaller than the current length,
+                // Safety: Checked that it's smaller than the current length,
                 // which cannot exceed LIMIT itself.
                 self.set_len(target);
             }
