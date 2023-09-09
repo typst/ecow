@@ -10,12 +10,12 @@ mod loom {
         "Loom tests are typically slow in debug mode. Run them with `--release`"
     );
 
-    use ecow::eco_vec;
+    use ecow::arc_vec;
 
     #[test]
     fn smoke() {
         loom::model(|| {
-            let mut one = eco_vec![1, 2, 3];
+            let mut one = arc_vec![1, 2, 3];
             let two = one.clone();
 
             loom::thread::spawn(move || {
