@@ -825,7 +825,7 @@ impl<T: Clone, RC: RefCount> Clone for EcoVec<T, RC> {
             let prev = header.refs.fetch_add(1, Relaxed);
 
             // See Arc's clone impl details about guarding against incredibly degenerate programs
-            if prev > isize::MAX as usize {
+            if prev > RC::SIGNED_MAX as usize {
                 ref_count_overflow::<T, RC>(self.ptr, self.len);
             }
         }
