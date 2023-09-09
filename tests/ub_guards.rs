@@ -1,4 +1,4 @@
-use ecow::{eco_vec, EcoVec};
+use ecow::{arc_vec, ArcVec};
 
 // Guarding against something like:
 // https://github.com/servo/rust-smallvec/issues/96 aka RUSTSEC-2018-0003
@@ -21,7 +21,7 @@ fn panicky_iterator_unwinds_correctly() {
         }
     }
 
-    let mut v = eco_vec![1, 2, 3];
+    let mut v = arc_vec![1, 2, 3];
     v.extend(PanicIter);
 }
 
@@ -30,7 +30,7 @@ fn panicky_iterator_unwinds_correctly() {
 // size_hint should only be treated as a hint, nothing more.
 #[test]
 fn small_size_hint_is_fine() {
-    let mut v = EcoVec::new();
+    let mut v = ArcVec::new();
     v.push(123);
 
     let iter = (0u8..=255).filter(|n| n % 2 == 0);
@@ -71,7 +71,7 @@ fn wacky_size_hint_is_fine() {
         }
     }
 
-    let mut v = EcoVec::new();
+    let mut v = ArcVec::new();
     v.extend(IncorrectIterator::new());
 
     assert_eq!(v, IncorrectIterator::new().collect::<Vec<_>>())

@@ -43,13 +43,14 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
+pub mod refcount;
 pub mod string;
 pub mod vec;
 
 mod dynamic;
 
 pub use self::string::EcoString;
-pub use self::vec::EcoVec;
+pub use self::vec::{sync::ArcVec, unsync::RcVec, EcoVec};
 
 #[cfg(doc)]
 use alloc::{string::String, sync::Arc, vec::Vec};

@@ -11,13 +11,69 @@ use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
 
-use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
+use crate::refcount::{AtomicRefCount, RefCount};
+use crate::sync::atomic::Ordering::*;
+
+/// An `EcoVec` that cannot be shared between multiple threads.
+pub mod unsync {
+
+    /// An `EcoVec` that cannot be shared between multiple threads.
+    pub type RcVec<T> = super::EcoVec<T, usize>;
+
+    #[macro_export]
+    /// Create a new [`RcVec`] with the given elements.
+    /// ```
+    /// # use ecow::rc_vec;
+    /// assert_eq!(rc_vec![1; 4], [1; 4]);
+    /// assert_eq!(rc_vec![1, 2, 3], [1, 2, 3]);
+    /// ```
+    macro_rules! rc_vec {
+        () => { $crate::RcVec::new() };
+        ($elem:expr; $n:expr) => { $crate::RcVec::from_elem($elem, $n) };
+        ($($value:expr),+ $(,)?) => { $crate::RcVec::from([$($value),+]) };
+    }
+}
+
+/// An `EcoVec` that can be shared between multiple threads.
+pub mod sync {
+    use core::sync::atomic::AtomicUsize;
+
+    /// An `EcoVec` that can be shared between multiple threads.
+    pub type ArcVec<T> = super::EcoVec<T, AtomicUsize>;
+
+    #[macro_export]
+    /// Create a new [`ArcVec`] with the given elements.
+    /// ```
+    /// # use ecow::arc_vec;
+    /// assert_eq!(arc_vec![1; 4], [1; 4]);
+    /// assert_eq!(arc_vec![1, 2, 3], [1, 2, 3]);
+    /// ```
+    macro_rules! arc_vec {
+        () => { $crate::ArcVec::new() };
+        ($elem:expr; $n:expr) => { $crate::ArcVec::from_elem($elem, $n) };
+        ($($value:expr),+ $(,)?) => { $crate::ArcVec::from([$($value),+]) };
+    }
+}
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
 /// # use ecow::eco_vec;
-/// assert_eq!(eco_vec![1; 4], [1; 4]);
-/// assert_eq!(eco_vec![1, 2, 3], [1, 2, 3]);
+/// # use ecow::EcoVec;
+/// # use core::sync::atomic::AtomicUsize;
+/// let vec: EcoVec<i32, AtomicUsize> = eco_vec![];
+/// assert_eq!(vec, []);
+///
+/// let vec: EcoVec<i32, AtomicUsize> = eco_vec![1; 4];
+/// assert_eq!(vec, [1; 4]);
+///
+/// let vec: EcoVec<i32, AtomicUsize> = eco_vec![1, 2, 3];
+/// assert_eq!(vec, [1, 2, 3]);
+///
+/// let vec: EcoVec<i32, usize> = eco_vec![1; 4];
+/// assert_eq!(vec, [1; 4]);
+///
+/// let vec: EcoVec<i32, usize> = eco_vec![1, 2, 3];
+/// assert_eq!(vec, [1, 2, 3]);
 /// ```
 #[macro_export]
 macro_rules! eco_vec {
@@ -45,9 +101,10 @@ macro_rules! eco_vec {
 /// # Example
 /// ```
 /// use ecow::EcoVec;
+/// use core::sync::atomic::AtomicUsize;
 ///
 /// // Empty vector does not allocate, but first push does.
-/// let mut first = EcoVec::new();
+/// let mut first = EcoVec::<i32, AtomicUsize>::new();
 /// first.push(1);
 /// first.push(2);
 /// assert_eq!(first, [1, 2]);
@@ -65,7 +122,7 @@ macro_rules! eco_vec {
 /// assert_eq!(second.into_iter().collect::<Vec<_>>(), vec![1, 2, 3]);
 /// ```
 #[repr(C)]
-pub struct EcoVec<T> {
+pub struct EcoVec<T, RC: RefCount> {
     /// Is `Self::dangling()` when the vector is unallocated.
     ///
     /// Otherwise, points `Self::offset()` bytes after a valid allocation and
@@ -79,19 +136,19 @@ pub struct EcoVec<T> {
     /// Invariant: `len <= capacity`.
     len: usize,
     /// For variance.
-    phantom: PhantomData<T>,
+    phantom: PhantomData<(T, RC)>,
 }
 
 /// The start of the backing allocation.
 ///
 /// This is followed by padding, if necessary, and then the actual data.
 #[derive(Debug)]
-struct Header {
+struct Header<RC: RefCount> {
     /// The vector's reference count. Starts at 1 and only drops to zero
     /// when the last vector is dropped.
     ///
     /// Invariant: `refs <= isize::MAX`.
-    refs: AtomicUsize,
+    refs: RC,
     /// The number of elements the backing allocation can hold. Zero if there
     /// is no backing allocation.
     ///
@@ -101,7 +158,7 @@ struct Header {
     capacity: usize,
 }
 
-impl<T> EcoVec<T> {
+impl<T, RC: RefCount> EcoVec<T, RC> {
     /// Create a new, empty vector.
     #[inline]
     pub const fn new() -> Self {
@@ -202,7 +259,7 @@ impl<T> EcoVec<T> {
     }
 }
 
-impl<T: Clone> EcoVec<T> {
+impl<T: Clone, RC: RefCount> EcoVec<T, RC> {
     /// Create a new vector with `n` copies of `value`.
     pub fn from_elem(value: T, n: usize) -> Self {
         let mut vec = Self::with_capacity(n);
@@ -490,7 +547,7 @@ impl<T: Clone> EcoVec<T> {
     }
 }
 
-impl<T> EcoVec<T> {
+impl<T, RC: RefCount> EcoVec<T, RC> {
     /// Grow the capacity to at least the `target` size.
     ///
     /// May only be called if:
@@ -545,8 +602,8 @@ impl<T> EcoVec<T> {
         // Safety:
         // The freshly allocated pointer is valid for a write of the header.
         ptr::write(
-            allocation.cast::<Header>(),
-            Header { refs: AtomicUsize::new(1), capacity: target },
+            allocation.cast::<Header<RC>>(),
+            Header { refs: RC::new(1), capacity: target },
         );
     }
 
@@ -567,11 +624,12 @@ impl<T> EcoVec<T> {
 
     /// A reference to the header.
     #[inline]
-    fn header(&self) -> Option<&Header> {
+    fn header(&self) -> Option<&Header<RC>> {
         // Safety:
         // If the vector is allocated, there is always a valid header.
-        self.is_allocated()
-            .then(|| unsafe { &*self.ptr.as_ptr().sub(Self::offset()).cast::<Header>() })
+        self.is_allocated().then(|| unsafe {
+            &*self.ptr.as_ptr().sub(Self::offset()).cast::<Header<RC>>()
+        })
     }
 
     /// The data pointer.
@@ -624,7 +682,7 @@ impl<T> EcoVec<T> {
     /// The alignment of the backing allocation.
     #[inline]
     const fn align() -> usize {
-        max(mem::align_of::<Header>(), mem::align_of::<T>())
+        max(mem::align_of::<Header<RC>>(), mem::align_of::<T>())
     }
 
     /// The offset of the data in the backing allocation.
@@ -633,7 +691,7 @@ impl<T> EcoVec<T> {
     /// the header.
     #[inline]
     const fn offset() -> usize {
-        max(mem::size_of::<Header>(), Self::align())
+        max(mem::size_of::<Header<RC>>(), Self::align())
     }
 
     /// The sentinel value of `self.ptr`, used to indicate an uninitialized,
@@ -674,7 +732,7 @@ impl<T> EcoVec<T> {
     }
 }
 
-impl<T: Clone> EcoVec<T> {
+impl<T: Clone, RC: RefCount> EcoVec<T, RC> {
     /// Clones and pushes all elements in a trusted-len iterator to the vector.
     ///
     /// The iterator must produce exactly `count` items.
@@ -709,7 +767,7 @@ impl<T: Clone> EcoVec<T> {
     }
 }
 
-impl EcoVec<u8> {
+impl<RC: RefCount> EcoVec<u8, RC> {
     /// Copies from a byte slice.
     #[inline]
     pub(crate) fn extend_from_byte_slice(&mut self, bytes: &[u8]) {
@@ -738,10 +796,10 @@ impl EcoVec<u8> {
 }
 
 // Safety: Works like `Arc`.
-unsafe impl<T: Sync + Send> Sync for EcoVec<T> {}
-unsafe impl<T: Sync + Send> Send for EcoVec<T> {}
+unsafe impl<T: Sync + Send, RC: AtomicRefCount> Sync for EcoVec<T, RC> {}
+unsafe impl<T: Sync + Send, RC: AtomicRefCount> Send for EcoVec<T, RC> {}
 
-impl<T> EcoVec<T> {
+impl<T, RC: RefCount> EcoVec<T, RC> {
     /// Whether no other vector is pointing to the same backing allocation.
     ///
     /// This takes a mutable reference because only callers with ownership or a
@@ -758,7 +816,7 @@ impl<T> EcoVec<T> {
     }
 }
 
-impl<T: Clone> Clone for EcoVec<T> {
+impl<T: Clone, RC: RefCount> Clone for EcoVec<T, RC> {
     #[inline]
     fn clone(&self) -> Self {
         // If the vector has a backing allocation, bump the ref-count.
@@ -768,7 +826,7 @@ impl<T: Clone> Clone for EcoVec<T> {
 
             // See Arc's clone impl details about guarding against incredibly degenerate programs
             if prev > isize::MAX as usize {
-                ref_count_overflow::<T>(self.ptr, self.len);
+                ref_count_overflow::<T, RC>(self.ptr, self.len);
             }
         }
 
@@ -776,7 +834,7 @@ impl<T: Clone> Clone for EcoVec<T> {
     }
 }
 
-impl<T> Drop for EcoVec<T> {
+impl<T, RC: RefCount> Drop for EcoVec<T, RC> {
     fn drop(&mut self) {
         // Drop our ref-count. If there was more than one vector before
         // (including this one), we shouldn't deallocate. Nothing to do if there
@@ -790,7 +848,7 @@ impl<T> Drop for EcoVec<T> {
         }
 
         // See Arc's drop impl for details.
-        atomic::fence(Acquire);
+        RC::fence(Acquire);
 
         // Ensures that the backing storage is deallocated even if one of the
         // element drops panics.
@@ -820,7 +878,7 @@ impl<T> Drop for EcoVec<T> {
     }
 }
 
-impl<T> Deref for EcoVec<T> {
+impl<T, RC: RefCount> Deref for EcoVec<T, RC> {
     type Target = [T];
 
     #[inline]
@@ -829,121 +887,121 @@ impl<T> Deref for EcoVec<T> {
     }
 }
 
-impl<T> Borrow<[T]> for EcoVec<T> {
+impl<T, RC: RefCount> Borrow<[T]> for EcoVec<T, RC> {
     #[inline]
     fn borrow(&self) -> &[T] {
         self.as_slice()
     }
 }
 
-impl<T> AsRef<[T]> for EcoVec<T> {
+impl<T, RC: RefCount> AsRef<[T]> for EcoVec<T, RC> {
     #[inline]
     fn as_ref(&self) -> &[T] {
         self.as_slice()
     }
 }
 
-impl<T> Default for EcoVec<T> {
+impl<T, RC: RefCount> Default for EcoVec<T, RC> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Debug> Debug for EcoVec<T> {
+impl<T: Debug, RC: RefCount> Debug for EcoVec<T, RC> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.as_slice().fmt(f)
     }
 }
 
-impl<T: Hash> Hash for EcoVec<T> {
+impl<T: Hash, RC: RefCount> Hash for EcoVec<T, RC> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_slice().hash(state);
     }
 }
 
-impl<T: Eq> Eq for EcoVec<T> {}
+impl<T: Eq, RC: RefCount> Eq for EcoVec<T, RC> {}
 
-impl<T: PartialEq> PartialEq for EcoVec<T> {
+impl<T: PartialEq, RC: RefCount> PartialEq for EcoVec<T, RC> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_slice() == other.as_slice()
     }
 }
 
-impl<T: PartialEq> PartialEq<[T]> for EcoVec<T> {
+impl<T: PartialEq, RC: RefCount> PartialEq<[T]> for EcoVec<T, RC> {
     #[inline]
     fn eq(&self, other: &[T]) -> bool {
         self.as_slice() == other
     }
 }
 
-impl<T: PartialEq> PartialEq<&[T]> for EcoVec<T> {
+impl<T: PartialEq, RC: RefCount> PartialEq<&[T]> for EcoVec<T, RC> {
     #[inline]
     fn eq(&self, other: &&[T]) -> bool {
         self.as_slice() == *other
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for EcoVec<T> {
+impl<T: PartialEq, RC: RefCount, const N: usize> PartialEq<[T; N]> for EcoVec<T, RC> {
     #[inline]
     fn eq(&self, other: &[T; N]) -> bool {
         self.as_slice() == other
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<&[T; N]> for EcoVec<T> {
+impl<T: PartialEq, RC: RefCount, const N: usize> PartialEq<&[T; N]> for EcoVec<T, RC> {
     #[inline]
     fn eq(&self, other: &&[T; N]) -> bool {
         self.as_slice() == *other
     }
 }
 
-impl<T: PartialEq> PartialEq<Vec<T>> for EcoVec<T> {
+impl<T: PartialEq, RC: RefCount> PartialEq<Vec<T>> for EcoVec<T, RC> {
     #[inline]
     fn eq(&self, other: &Vec<T>) -> bool {
         self.as_slice() == other
     }
 }
 
-impl<T: PartialEq> PartialEq<EcoVec<T>> for [T] {
+impl<T: PartialEq, RC: RefCount> PartialEq<EcoVec<T, RC>> for [T] {
     #[inline]
-    fn eq(&self, other: &EcoVec<T>) -> bool {
+    fn eq(&self, other: &EcoVec<T, RC>) -> bool {
         self == other.as_slice()
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<EcoVec<T>> for [T; N] {
+impl<T: PartialEq, RC: RefCount, const N: usize> PartialEq<EcoVec<T, RC>> for [T; N] {
     #[inline]
-    fn eq(&self, other: &EcoVec<T>) -> bool {
+    fn eq(&self, other: &EcoVec<T, RC>) -> bool {
         self == other.as_slice()
     }
 }
 
-impl<T: PartialEq> PartialEq<EcoVec<T>> for Vec<T> {
+impl<T: PartialEq, RC: RefCount> PartialEq<EcoVec<T, RC>> for Vec<T> {
     #[inline]
-    fn eq(&self, other: &EcoVec<T>) -> bool {
+    fn eq(&self, other: &EcoVec<T, RC>) -> bool {
         self == other.as_slice()
     }
 }
 
-impl<T: Ord> Ord for EcoVec<T> {
+impl<T: Ord, RC: RefCount> Ord for EcoVec<T, RC> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.as_slice().cmp(other.as_slice())
     }
 }
 
-impl<T: PartialOrd> PartialOrd for EcoVec<T> {
+impl<T: PartialOrd, RC: RefCount> PartialOrd for EcoVec<T, RC> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_slice().partial_cmp(other.as_slice())
     }
 }
 
-impl<T: Clone> From<&[T]> for EcoVec<T> {
+impl<T: Clone, RC: RefCount> From<&[T]> for EcoVec<T, RC> {
     fn from(slice: &[T]) -> Self {
         let mut vec = Self::new();
         vec.extend_from_slice(slice);
@@ -951,7 +1009,7 @@ impl<T: Clone> From<&[T]> for EcoVec<T> {
     }
 }
 
-impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
+impl<T: Clone, RC: RefCount, const N: usize> From<[T; N]> for EcoVec<T, RC> {
     fn from(array: [T; N]) -> Self {
         let mut vec = Self::new();
         unsafe {
@@ -962,7 +1020,7 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> From<Vec<T>> for EcoVec<T> {
+impl<T: Clone, RC: RefCount> From<Vec<T>> for EcoVec<T, RC> {
     /// This needs to allocate to change the layout.
     fn from(other: Vec<T>) -> Self {
         let mut vec = Self::new();
@@ -974,7 +1032,7 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> FromIterator<T> for EcoVec<T> {
+impl<T: Clone, RC: RefCount> FromIterator<T> for EcoVec<T, RC> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let hint = iter.size_hint().0;
@@ -984,7 +1042,7 @@ impl<T: Clone> FromIterator<T> for EcoVec<T> {
     }
 }
 
-impl<T: Clone> Extend<T> for EcoVec<T> {
+impl<T: Clone, RC: RefCount> Extend<T> for EcoVec<T, RC> {
     fn extend<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = T>,
@@ -1000,7 +1058,7 @@ impl<T: Clone> Extend<T> for EcoVec<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a EcoVec<T> {
+impl<'a, T, RC: RefCount> IntoIterator for &'a EcoVec<T, RC> {
     type IntoIter = core::slice::Iter<'a, T>;
     type Item = &'a T;
 
@@ -1010,8 +1068,8 @@ impl<'a, T> IntoIterator for &'a EcoVec<T> {
     }
 }
 
-impl<T: Clone> IntoIterator for EcoVec<T> {
-    type IntoIter = IntoIter<T>;
+impl<T: Clone, RC: RefCount> IntoIterator for EcoVec<T, RC> {
+    type IntoIter = IntoIter<T, RC>;
     type Item = T;
 
     #[inline]
@@ -1029,9 +1087,9 @@ impl<T: Clone> IntoIterator for EcoVec<T> {
 ///
 /// If the vector had a reference count of 1, this moves out of the vector,
 /// otherwise it lazily clones.
-pub struct IntoIter<T> {
+pub struct IntoIter<T, RC: RefCount> {
     /// The underlying vector.
-    vec: EcoVec<T>,
+    vec: EcoVec<T, RC>,
     /// Whether we have unique ownership over the underlying allocation.
     unique: bool,
     /// How many elements we have already read from the front.
@@ -1046,7 +1104,7 @@ pub struct IntoIter<T> {
     back: usize,
 }
 
-impl<T> IntoIter<T> {
+impl<T, RC: RefCount> IntoIter<T, RC> {
     /// Returns the remaining items of this iterator as a slice.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
@@ -1064,7 +1122,7 @@ impl<T> IntoIter<T> {
     }
 }
 
-impl<T: Clone> Iterator for IntoIter<T> {
+impl<T: Clone, RC: RefCount> Iterator for IntoIter<T, RC> {
     type Item = T;
 
     #[inline]
@@ -1100,7 +1158,7 @@ impl<T: Clone> Iterator for IntoIter<T> {
     }
 }
 
-impl<T: Clone> DoubleEndedIterator for IntoIter<T> {
+impl<T: Clone, RC: RefCount> DoubleEndedIterator for IntoIter<T, RC> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         (self.back > self.front).then(|| {
@@ -1122,9 +1180,9 @@ impl<T: Clone> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
-impl<T: Clone> ExactSizeIterator for IntoIter<T> {}
+impl<T: Clone, RC: RefCount> ExactSizeIterator for IntoIter<T, RC> {}
 
-impl<T> Drop for IntoIter<T> {
+impl<T, RC: RefCount> Drop for IntoIter<T, RC> {
     fn drop(&mut self) {
         if !self.unique || !self.vec.is_allocated() {
             return;
@@ -1151,7 +1209,7 @@ impl<T> Drop for IntoIter<T> {
     }
 }
 
-impl<T: Debug> Debug for IntoIter<T> {
+impl<T: Debug, RC: RefCount> Debug for IntoIter<T, RC> {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_tuple("IntoIter").field(&self.as_slice()).finish()
@@ -1164,9 +1222,9 @@ fn capacity_overflow() -> ! {
 }
 
 #[cold]
-fn ref_count_overflow<T>(ptr: NonNull<u8>, len: usize) -> ! {
+fn ref_count_overflow<T, RC: RefCount>(ptr: NonNull<u8>, len: usize) -> ! {
     // Drop to decrement the ref count to counter the increment in `clone()`
-    drop(EcoVec::<T> { ptr, len, phantom: PhantomData });
+    drop(EcoVec::<T, RC> { ptr, len, phantom: PhantomData });
     panic!("reference count overflow");
 }
 
@@ -1185,7 +1243,7 @@ const fn max(x: usize, y: usize) -> usize {
 }
 
 #[cfg(feature = "std")]
-impl std::io::Write for EcoVec<u8> {
+impl<RC: RefCount> std::io::Write for EcoVec<u8, RC> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.extend_from_byte_slice(buf);
@@ -1200,11 +1258,11 @@ impl std::io::Write for EcoVec<u8> {
 
 #[cfg(feature = "serde")]
 mod serde {
-    use crate::EcoVec;
+    use crate::{refcount::RefCount, EcoVec};
     use core::{fmt, marker::PhantomData};
     use serde::de::{Deserializer, Visitor};
 
-    impl<T: serde::Serialize> serde::Serialize for EcoVec<T> {
+    impl<T: serde::Serialize, RC: RefCount> serde::Serialize for EcoVec<T, RC> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer,
@@ -1215,8 +1273,10 @@ mod serde {
 
     struct EcoVecVisitor<T>(PhantomData<T>);
 
-    impl<'a, T: serde::Deserialize<'a> + Clone> Visitor<'a> for EcoVecVisitor<T> {
-        type Value = EcoVec<T>;
+    impl<'a, T: serde::Deserialize<'a> + Clone, RC: RefCount> Visitor<'a>
+        for EcoVecVisitor<T>
+    {
+        type Value = EcoVec<T, RC>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a sequence")
@@ -1235,7 +1295,9 @@ mod serde {
         }
     }
 
-    impl<'de, T: serde::Deserialize<'de> + Clone> serde::Deserialize<'de> for EcoVec<T> {
+    impl<'de, T: serde::Deserialize<'de> + Clone, RC: RefCount> serde::Deserialize<'de>
+        for EcoVec<T, RC>
+    {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,

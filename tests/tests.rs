@@ -9,7 +9,8 @@ use std::fmt::Write;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
-use ecow::{eco_vec, EcoString, EcoVec};
+use ecow::ArcVec;
+use ecow::{arc_vec, EcoString};
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
 const LIMIT: usize = EcoString::INLINE_LIMIT;
@@ -21,8 +22,8 @@ fn v<T>(value: T) -> Box<T> {
 #[test]
 fn test_mem_size() {
     let word = mem::size_of::<usize>();
-    assert_eq!(mem::size_of::<EcoVec<u8>>(), 2 * word);
-    assert_eq!(mem::size_of::<Option<EcoVec<u8>>>(), 2 * word);
+    assert_eq!(mem::size_of::<ArcVec<u8>>(), 2 * word);
+    assert_eq!(mem::size_of::<Option<ArcVec<u8>>>(), 2 * word);
 
     if cfg!(target_endian = "little") {
         if cfg!(target_pointer_width = "32") {
@@ -40,18 +41,18 @@ fn test_mem_size() {
 
 #[test]
 fn test_vec_macro() {
-    assert_eq!(eco_vec![Box::new(1); 3], vec![v(1); 3]);
+    assert_eq!(arc_vec![Box::new(1); 3], vec![v(1); 3]);
 }
 
 #[test]
 fn test_vec_construction() {
-    assert_eq!(EcoVec::<()>::default(), &[]);
-    assert_eq!(EcoVec::from(vec![(); 100]), vec![(); 100]);
+    assert_eq!(ArcVec::<()>::default(), &[]);
+    assert_eq!(ArcVec::from(vec![(); 100]), vec![(); 100]);
 }
 
 #[test]
 fn test_vec_with_capacity() {
-    let mut vec = EcoVec::with_capacity(3);
+    let mut vec = ArcVec::with_capacity(3);
     assert_eq!(vec.capacity(), 3);
     let ptr = vec.as_ptr();
     vec.push(1);
@@ -65,12 +66,12 @@ fn test_vec_with_capacity() {
 #[test]
 #[should_panic(expected = "capacity overflow")]
 fn test_vec_with_capacity_fail() {
-    EcoVec::<u8>::with_capacity(usize::MAX);
+    ArcVec::<u8>::with_capacity(usize::MAX);
 }
 
 #[test]
 fn test_vec_empty() {
-    let mut first = EcoVec::with_capacity(3);
+    let mut first = ArcVec::with_capacity(3);
     assert!(first.is_empty());
     assert_eq!(first.len(), 0);
     first.push("hi".to_string());
@@ -87,7 +88,7 @@ fn test_vec_empty() {
 
 #[test]
 fn test_vec_make_mut() {
-    let mut first = eco_vec![4, -3, 11, 6, 10];
+    let mut first = arc_vec![4, -3, 11, 6, 10];
     let ptr = first.as_ptr();
     first.make_mut()[1] -= 1;
     assert_eq!(ptr, first.as_ptr());
@@ -99,7 +100,7 @@ fn test_vec_make_mut() {
 
 #[test]
 fn test_vec_push() {
-    let mut first = EcoVec::new();
+    let mut first = ArcVec::new();
     first.push(1);
     first.push(2);
     first.push(3);
@@ -118,7 +119,7 @@ fn test_vec_push() {
 
 #[test]
 fn test_vec_pop() {
-    let mut first = EcoVec::new();
+    let mut first = ArcVec::new();
     assert_eq!(first.pop(), None);
     first.push(v("a"));
     let ptr = first.as_ptr();
@@ -135,7 +136,7 @@ fn test_vec_pop() {
 
 #[test]
 fn test_vec_insert() {
-    let mut first = EcoVec::new();
+    let mut first = ArcVec::new();
     first.insert(0, "okay");
     let ptr = first.as_ptr();
     first.insert(0, "reverse");
@@ -152,12 +153,12 @@ fn test_vec_insert() {
 #[test]
 #[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
 fn test_vec_insert_fail() {
-    EcoVec::from([1, 2, 3]).insert(4, 0);
+    ArcVec::from([1, 2, 3]).insert(4, 0);
 }
 
 #[test]
 fn test_vec_remove() {
-    let mut first = EcoVec::with_capacity(4);
+    let mut first = ArcVec::with_capacity(4);
     let ptr = first.as_ptr();
     first.extend_from_slice(&[v(2), v(4), v(1)]);
     let second = first.clone();
@@ -171,12 +172,12 @@ fn test_vec_remove() {
 #[test]
 #[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
 fn test_vec_remove_fail() {
-    EcoVec::from([1, 2, 3]).remove(4);
+    ArcVec::from([1, 2, 3]).remove(4);
 }
 
 #[test]
 fn test_vec_truncate() {
-    let mut vec = eco_vec!["ok"; 10];
+    let mut vec = arc_vec!["ok"; 10];
     vec.truncate(13);
     vec.truncate(3);
     assert_eq!(vec, ["ok"; 3]);
@@ -188,7 +189,7 @@ fn test_vec_truncate() {
 
 #[test]
 fn test_vec_extend() {
-    let mut vec = EcoVec::new();
+    let mut vec = ArcVec::new();
     vec.extend_from_slice(&[]);
     vec.extend_from_slice(&[2, 3, 4]);
     assert_eq!(vec, [2, 3, 4]);
@@ -196,7 +197,7 @@ fn test_vec_extend() {
 
 #[test]
 fn test_vec_into_iter() {
-    let first = eco_vec![v(2), v(4), v(5)];
+    let first = arc_vec![v(2), v(4), v(5)];
     let mut second = first.clone();
     assert_eq!(first.clone().into_iter().count(), 3);
     assert_eq!(second.clone().into_iter().rev().collect::<Vec<_>>(), [v(5), v(4), v(2)]);
@@ -223,7 +224,7 @@ fn test_vec_zst() {
         }
     }
 
-    let mut vec = EcoVec::new();
+    let mut vec = ArcVec::new();
     for _ in 0..1000 {
         vec.push(Potato);
     }
@@ -238,7 +239,7 @@ fn test_vec_huge_alignment() {
     #[derive(Debug, PartialEq, Clone)]
     #[repr(align(128))]
     struct B(&'static str);
-    let mut vec: EcoVec<B> =
+    let mut vec: ArcVec<B> =
         "hello, world! what's going on?".split_whitespace().map(B).collect();
 
     assert_eq!(vec.len(), 5);
@@ -259,7 +260,7 @@ fn test_vec_huge_alignment() {
     vec.truncate(1);
     assert_eq!(vec.last(), vec.first());
 
-    let empty: EcoVec<B> = EcoVec::new();
+    let empty: ArcVec<B> = ArcVec::new();
     assert_eq!(empty, &[]);
 }
 
@@ -275,7 +276,7 @@ fn test_vec_drop_panic() {
         }
     }
 
-    eco_vec![Potato];
+    arc_vec![Potato];
 }
 
 #[test]
@@ -289,7 +290,7 @@ fn test_vec_clear_drop_panic() {
         }
     }
 
-    let mut vec = eco_vec![Potato];
+    let mut vec = arc_vec![Potato];
     vec.clear();
 }
 
@@ -476,9 +477,9 @@ fn test_str_complex() {
 
     let bar = EcoString::from("bar");
 
-    let mut hash_map: HashMap<_, EcoVec<_>> = [
-        (foo.clone(), eco_vec![foo.clone(), bar.clone(), foo]),
-        (bar.clone(), eco_vec![bar; 1]),
+    let mut hash_map: HashMap<_, ArcVec<_>> = [
+        (foo.clone(), arc_vec![foo.clone(), bar.clone(), foo]),
+        (bar.clone(), arc_vec![bar; 1]),
     ]
     .into_iter()
     .collect();

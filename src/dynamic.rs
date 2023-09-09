@@ -1,7 +1,7 @@
 use core::mem::{self, ManuallyDrop};
 use core::ptr;
 
-use super::EcoVec;
+use super::ArcVec;
 
 /// A byte vector that can hold up to 15 bytes inline and then spills to an
 /// `EcoVec<u8>`.
@@ -17,21 +17,21 @@ pub(crate) struct DynamicVec(Repr);
 #[repr(C)]
 union Repr {
     inline: InlineVec,
-    spilled: ManuallyDrop<EcoVec<u8>>,
+    spilled: ManuallyDrop<ArcVec<u8>>,
 }
 
 /// This is never stored in memory, it's just an abstraction for safe access.
 #[derive(Debug)]
 enum Variant<'a> {
     Inline(&'a InlineVec),
-    Spilled(&'a EcoVec<u8>),
+    Spilled(&'a ArcVec<u8>),
 }
 
 /// This is never stored in memory, it's just an abstraction for safe access.
 #[derive(Debug)]
 enum VariantMut<'a> {
     Inline(&'a mut InlineVec),
-    Spilled(&'a mut EcoVec<u8>),
+    Spilled(&'a mut ArcVec<u8>),
 }
 
 /// The maximum amount of inline storage. Typically, this is 15 bytes.
@@ -45,8 +45,8 @@ enum VariantMut<'a> {
 ///   limit too.
 pub(crate) const LIMIT: usize = {
     let mut limit = 15;
-    if limit < mem::size_of::<EcoVec<u8>>() - 1 {
-        limit = mem::size_of::<EcoVec<u8>>() - 1;
+    if limit < mem::size_of::<ArcVec<u8>>() - 1 {
+        limit = mem::size_of::<ArcVec<u8>>() - 1;
     }
     if cfg!(target_endian = "big") {
         limit += mem::size_of::<usize>();
@@ -74,7 +74,7 @@ impl DynamicVec {
     }
 
     #[inline]
-    pub const fn from_eco(vec: EcoVec<u8>) -> Self {
+    pub const fn from_eco(vec: ArcVec<u8>) -> Self {
         // Safety:
         // Explicitly set `tagged_len` to 0 to mark this as a spilled variant.
         // Just initializing with `Repr { spilled: ... }` would leave
@@ -90,7 +90,7 @@ impl DynamicVec {
     pub fn from_slice(bytes: &[u8]) -> Self {
         match InlineVec::from_slice(bytes) {
             Ok(inline) => Self::from_inline(inline),
-            _ => Self::from_eco(EcoVec::from(bytes)),
+            _ => Self::from_eco(ArcVec::from(bytes)),
         }
     }
 
@@ -99,7 +99,7 @@ impl DynamicVec {
         if capacity <= LIMIT {
             Self::new()
         } else {
-            Self::from_eco(EcoVec::with_capacity(capacity))
+            Self::from_eco(ArcVec::with_capacity(capacity))
         }
     }
 
@@ -124,7 +124,7 @@ impl DynamicVec {
         match self.variant_mut() {
             VariantMut::Inline(inline) => {
                 if inline.push(byte).is_err() {
-                    let mut eco = EcoVec::with_capacity(inline.len() + 1);
+                    let mut eco = ArcVec::with_capacity(inline.len() + 1);
                     eco.extend_from_byte_slice(self.as_slice());
                     eco.push(byte);
                     *self = Self::from_eco(eco);
@@ -141,7 +141,7 @@ impl DynamicVec {
         match self.variant_mut() {
             VariantMut::Inline(inline) => {
                 if inline.extend_from_slice(bytes).is_err() {
-                    let mut eco = EcoVec::with_capacity(inline.len() + bytes.len());
+                    let mut eco = ArcVec::with_capacity(inline.len() + bytes.len());
                     eco.extend_from_byte_slice(self.as_slice());
                     eco.extend_from_byte_slice(bytes);
                     *self = Self::from_eco(eco);
