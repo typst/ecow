@@ -1,5 +1,6 @@
 //! Traits for types that can be used as reference counts.
 
+use core::cell::Cell;
 use core::sync::atomic::{
     self, AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering,
 };
@@ -16,10 +17,10 @@ pub trait RefCount {
     /// Load the reference count.
     fn load(&self, order: Ordering) -> usize;
 
-    /// Increment the reference count.
+    /// Increment the reference count, and return the **previous** value.
     fn fetch_add(&self, amount: usize, order: Ordering) -> usize;
 
-    /// Decrement the reference count.
+    /// Decrement the reference count, and return the **previous** value.
     fn fetch_sub(&self, amount: usize, order: Ordering) -> usize;
 
     /// Insert a fence.
@@ -74,27 +75,31 @@ impl_atomic_refcount!(AtomicU8, u8, i8);
 
 macro_rules! impl_refcount {
     ($ty:ty, $signed_ty:ty) => {
-        impl RefCount for $ty {
+        impl RefCount for Cell<$ty> {
             const SIGNED_MAX: isize = <$signed_ty>::MAX as isize;
 
             #[inline(always)]
             fn new(count: usize) -> Self {
-                count as Self
+                Self::new(count as $ty)
             }
 
             #[inline(always)]
             fn load(&self, _: Ordering) -> usize {
-                (*self) as usize
+                self.get() as usize
             }
 
             #[inline(always)]
             fn fetch_add(&self, amount: usize, _: Ordering) -> usize {
-                (*self + amount as Self) as usize
+                let count = self.get();
+                self.set(count + (amount as $ty));
+                count as usize
             }
 
             #[inline(always)]
             fn fetch_sub(&self, amount: usize, _: Ordering) -> usize {
-                (*self - amount as Self) as usize
+                let count = self.get();
+                self.set(count - (amount as $ty));
+                count as usize
             }
 
             #[inline(always)]

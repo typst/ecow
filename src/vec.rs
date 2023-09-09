@@ -16,9 +16,10 @@ use crate::sync::atomic::Ordering::*;
 
 /// An `EcoVec` that cannot be shared between multiple threads.
 pub mod unsync {
+    use core::cell::Cell;
 
     /// An `EcoVec` that cannot be shared between multiple threads.
-    pub type RcVec<T> = super::EcoVec<T, usize>;
+    pub type RcVec<T> = super::EcoVec<T, Cell<usize>>;
 
     #[macro_export]
     /// Create a new [`RcVec`] with the given elements.
@@ -60,6 +61,7 @@ pub mod sync {
 /// # use ecow::eco_vec;
 /// # use ecow::EcoVec;
 /// # use core::sync::atomic::AtomicUsize;
+/// # use core::cell::Cell;
 /// let vec: EcoVec<i32, AtomicUsize> = eco_vec![];
 /// assert_eq!(vec, []);
 ///
@@ -69,10 +71,10 @@ pub mod sync {
 /// let vec: EcoVec<i32, AtomicUsize> = eco_vec![1, 2, 3];
 /// assert_eq!(vec, [1, 2, 3]);
 ///
-/// let vec: EcoVec<i32, usize> = eco_vec![1; 4];
+/// let vec: EcoVec<i32, Cell<usize>> = eco_vec![1; 4];
 /// assert_eq!(vec, [1; 4]);
 ///
-/// let vec: EcoVec<i32, usize> = eco_vec![1, 2, 3];
+/// let vec: EcoVec<i32, Cell<usize>> = eco_vec![1, 2, 3];
 /// assert_eq!(vec, [1, 2, 3]);
 /// ```
 #[macro_export]
