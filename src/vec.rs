@@ -1176,6 +1176,7 @@ fn out_of_bounds(index: usize, len: usize) -> ! {
 }
 
 // Copy of `std::cmp::max::<usize>()` that is callable in `const` contexts
+#[inline]
 const fn max(x: usize, y: usize) -> usize {
     if x > y {
         x
