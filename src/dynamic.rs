@@ -120,6 +120,14 @@ impl DynamicVec {
     }
 
     #[inline]
+    pub fn make_mut(&mut self) -> &mut [u8] {
+        match self.variant_mut() {
+            VariantMut::Inline(inline) => inline.as_mut_slice(),
+            VariantMut::Spilled(spilled) => spilled.make_mut(),
+        }
+    }
+
+    #[inline]
     pub fn push(&mut self, byte: u8) {
         match self.variant_mut() {
             VariantMut::Inline(inline) => {
@@ -292,6 +300,13 @@ impl InlineVec {
     pub fn as_slice(&self) -> &[u8] {
         // Safety: We have the invariant `len <= LIMIT`.
         unsafe { self.buf.get_unchecked(..self.len()) }
+    }
+
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        // Safety: We have the invariant `len <= LIMIT`.
+        let len = self.len();
+        unsafe { self.buf.get_unchecked_mut(..len) }
     }
 
     #[inline]

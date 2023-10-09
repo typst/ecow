@@ -123,6 +123,19 @@ impl EcoString {
         unsafe { core::str::from_utf8_unchecked(self.0.as_slice()) }
     }
 
+    /// Produce a mutable slice containing the entire string.
+    ///
+    /// Clones the string if its reference count is larger than 1.
+    #[inline]
+    pub fn make_mut(&mut self) -> &mut str {
+        // Safety:
+        // The buffer contents stem from correct UTF-8 sources:
+        // - Valid ASCII characters
+        // - Other string slices
+        // - Chars that were encoded with char::encode_utf8
+        unsafe { core::str::from_utf8_unchecked_mut(self.0.make_mut()) }
+    }
+
     /// Append the given character at the end.
     #[inline]
     pub fn push(&mut self, c: char) {
@@ -153,7 +166,36 @@ impl EcoString {
         self.0.clear();
     }
 
-    /// Convert the string to lowercase.
+    /// Replaces all matches of a string with another string.
+    ///
+    /// This is a bit less general that [`str::replace`] because the `Pattern`
+    /// trait is unstable. In return, it can produce an `EcoString` without
+    /// any intermediate [`String`] allocation.
+    pub fn replace(&self, pat: &str, to: &str) -> Self {
+        self.replacen(pat, to, usize::MAX)
+    }
+
+    /// Replaces the first N matches of a string with another string.
+    ///
+    /// This is a bit less general that [`str::replacen`] because the `Pattern`
+    /// trait is unstable. In return, it can produce an `EcoString` without
+    /// any intermediate [`String`] allocation.
+    pub fn replacen(&self, pat: &str, to: &str, count: usize) -> Self {
+        // Copied from the standard library: https://github.com/rust-lang/rust
+        let mut result = Self::new();
+        let mut last_end = 0;
+        for (start, part) in self.match_indices(pat).take(count) {
+            // Safety: Copied from std.
+            result.push_str(unsafe { self.get_unchecked(last_end..start) });
+            result.push_str(to);
+            last_end = start + part.len();
+        }
+        // Safety: Copied from std.
+        result.push_str(unsafe { self.get_unchecked(last_end..self.len()) });
+        result
+    }
+
+    /// Returns the lowercase equivalent of this string.
     pub fn to_lowercase(&self) -> Self {
         let str = self.as_str();
         let mut lower = Self::with_capacity(str.len());
@@ -169,7 +211,7 @@ impl EcoString {
         lower
     }
 
-    /// Convert the string to uppercase.
+    /// Returns the uppercase equivalent of this string.
     pub fn to_uppercase(&self) -> Self {
         let str = self.as_str();
         let mut upper = Self::with_capacity(str.len());
@@ -179,6 +221,22 @@ impl EcoString {
             }
         }
         upper
+    }
+
+    /// Returns a copy of this string where each character is mapped to its
+    /// ASCII uppercase equivalent.
+    pub fn to_ascii_lowercase(&self) -> Self {
+        let mut s = self.clone();
+        s.make_mut().make_ascii_lowercase();
+        s
+    }
+
+    /// Returns a copy of this string where each character is mapped to its
+    /// ASCII uppercase equivalent.
+    pub fn to_ascii_uppercase(&self) -> Self {
+        let mut s = self.clone();
+        s.make_mut().make_ascii_uppercase();
+        s
     }
 
     /// Repeat this string `n` times.
@@ -284,7 +342,7 @@ impl Ord for EcoString {
 impl PartialOrd for EcoString {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_str().partial_cmp(other.as_str())
+        Some(self.cmp(other))
     }
 }
 

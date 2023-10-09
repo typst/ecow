@@ -1210,7 +1210,7 @@ mod serde {
         where
             S: serde::Serializer,
         {
-            (&self[..]).serialize(serializer)
+            self.as_slice().serialize(serializer)
         }
     }
 
