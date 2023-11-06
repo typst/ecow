@@ -438,6 +438,13 @@ impl From<String> for EcoString {
     }
 }
 
+impl From<&String> for EcoString {
+    #[inline]
+    fn from(s: &String) -> Self {
+        Self::from_str(s.as_str())
+    }
+}
+
 impl From<Cow<'_, str>> for EcoString {
     #[inline]
     fn from(s: Cow<str>) -> Self {
