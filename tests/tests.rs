@@ -316,6 +316,7 @@ fn test_str_push() {
     v.push('a');
     v.push('b');
     v.push_str("cd😀");
+    assert_eq!(v, v);
     assert_eq!(v, "abcd😀");
     assert_eq!(v.len(), 8);
 

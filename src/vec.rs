@@ -200,6 +200,13 @@ impl<T> EcoVec<T> {
             ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.data_mut(), prev));
         }
     }
+
+    /// Whether the two vectors point to the same underlying allocation.
+    ///
+    /// Also returns `true` if both are empty and unallocated.
+    pub fn ptr_eq(a: &Self, b: &Self) -> bool {
+        std::ptr::eq(a.ptr.as_ptr(), b.ptr.as_ptr())
+    }
 }
 
 impl<T: Clone> EcoVec<T> {

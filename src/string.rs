@@ -57,7 +57,7 @@ macro_rules! eco_format {
 /// The above holds true for normal 32-bit or 64-bit little endian systems. On
 /// 64-bit big-endian systems, the type's size increases to 24 bytes and the
 /// amount of inline storage to 23 bytes.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct EcoString(DynamicVec);
 
 impl EcoString {
@@ -278,15 +278,6 @@ impl Display for EcoString {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Display::fmt(self.as_str(), f)
-    }
-}
-
-impl Eq for EcoString {}
-
-impl PartialEq for EcoString {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str().eq(other.as_str())
     }
 }
 

@@ -221,6 +221,23 @@ impl DynamicVec {
     }
 }
 
+impl Eq for DynamicVec {}
+
+impl PartialEq for DynamicVec {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        if let (Variant::Spilled(a), Variant::Spilled(b)) =
+            (self.variant(), other.variant())
+        {
+            if EcoVec::ptr_eq(a, b) {
+                return true;
+            }
+        }
+
+        self.as_slice() == other.as_slice()
+    }
+}
+
 impl Clone for DynamicVec {
     #[inline]
     fn clone(&self) -> Self {
