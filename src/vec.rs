@@ -73,12 +73,12 @@ pub struct EcoVec<T> {
     /// maximum of the header's alignment and T's alignment. The pointer is
     /// valid for `len` reads and `capacity` writes of T. The elements may only
     /// be accessed mutably if the reference-count is `1`.
-    ptr: NonNull<u8>,
+    ptr: NonNull<T>,
     /// The number of elements in the vector.
     ///
     /// Invariant: `len <= capacity`.
     len: usize,
-    /// For variance.
+    /// See Vec's impl for more details.
     phantom: PhantomData<T>,
 }
 
@@ -523,7 +523,7 @@ impl<T> EcoVec<T> {
             //   and rounded up to the nearest multiple of `Self::align()`
             //   does not overflow `isize::MAX`.
             alloc::alloc::realloc(
-                self.allocation(),
+                self.allocation_mut(),
                 Self::layout(self.capacity()),
                 Self::size(target),
             )
@@ -539,7 +539,7 @@ impl<T> EcoVec<T> {
         // Just checked for null and adding only increases the size. Can't
         // overflow because the `allocation` is a valid pointer to
         // `Self::size(target)` bytes and `Self::offset() < Self::size(target)`.
-        self.ptr = NonNull::new_unchecked(allocation.add(Self::offset()));
+        self.ptr = NonNull::new_unchecked(allocation.add(Self::offset()).cast());
         debug_assert_ne!(self.ptr, Self::dangling());
 
         // Safety:
@@ -556,13 +556,22 @@ impl<T> EcoVec<T> {
         !ptr::eq(self.ptr.as_ptr(), Self::dangling().as_ptr())
     }
 
-    /// The pointer to the backing allocation.
+    /// An immutable pointer to the backing allocation.
     ///
     /// May only be called if `is_allocated` returns `true`.
     #[inline]
-    unsafe fn allocation(&mut self) -> *mut u8 {
+    unsafe fn allocation(&self) -> *const u8 {
         debug_assert!(self.is_allocated());
-        self.ptr.as_ptr().sub(Self::offset())
+        self.ptr.as_ptr().cast::<u8>().sub(Self::offset())
+    }
+
+    /// A mutable pointer to the backing allocation.
+    ///
+    /// May only be called if `is_allocated` returns `true`.
+    #[inline]
+    unsafe fn allocation_mut(&mut self) -> *mut u8 {
+        debug_assert!(self.is_allocated());
+        self.ptr.as_ptr().cast::<u8>().sub(Self::offset())
     }
 
     /// A reference to the header.
@@ -571,7 +580,7 @@ impl<T> EcoVec<T> {
         // Safety:
         // If the vector is allocated, there is always a valid header.
         self.is_allocated()
-            .then(|| unsafe { &*self.ptr.as_ptr().sub(Self::offset()).cast::<Header>() })
+            .then(|| unsafe { &*self.allocation().cast::<Header>() })
     }
 
     /// The data pointer.
@@ -580,7 +589,7 @@ impl<T> EcoVec<T> {
     /// reads of `T`.
     #[inline]
     fn data(&self) -> *const T {
-        self.ptr.as_ptr().cast::<T>()
+        self.ptr.as_ptr()
     }
 
     /// The data pointer, mutably.
@@ -591,7 +600,7 @@ impl<T> EcoVec<T> {
     /// May only be called if the reference count is 1.
     #[inline]
     unsafe fn data_mut(&mut self) -> *mut T {
-        self.ptr.as_ptr().cast::<T>()
+        self.ptr.as_ptr()
     }
 
     /// The layout of a backing allocation for the given capacity.
@@ -646,13 +655,13 @@ impl<T> EcoVec<T> {
     /// value, because allocated vector elements start `Self::offset()` bytes
     /// into a heap allocation and heap allocations cannot start at 0 (null).
     #[inline]
-    const fn dangling() -> NonNull<u8> {
+    const fn dangling() -> NonNull<T> {
         unsafe {
             // Safety: This is the stable equivalent of `core::ptr::invalid_mut`.
             // The pointer we create has no provenance and may not be
             // read/write/offset.
             #[allow(clippy::useless_transmute)]
-            let ptr = mem::transmute::<usize, *mut u8>(Self::offset());
+            let ptr = mem::transmute::<usize, *mut T>(Self::offset());
 
             // Safety: `Self::offset()` is never 0.
             NonNull::new_unchecked(ptr)
@@ -661,7 +670,7 @@ impl<T> EcoVec<T> {
 
     /// The minimum non-zero capacity.
     #[inline]
-    fn min_cap() -> usize {
+    const fn min_cap() -> usize {
         // In the spirit of the `EcoVec`, we choose the cutoff size of T from
         // which 1 is the minimum capacity a bit lower than a standard `Vec`.
         if mem::size_of::<T>() == 1 {
@@ -768,7 +777,7 @@ impl<T: Clone> Clone for EcoVec<T> {
 
             // See Arc's clone impl details about guarding against incredibly degenerate programs
             if prev > isize::MAX as usize {
-                ref_count_overflow::<T>(self.ptr, self.len);
+                ref_count_overflow(self.ptr, self.len);
             }
         }
 
@@ -809,7 +818,7 @@ impl<T> Drop for EcoVec<T> {
         // The vector has a header, so `self.allocation()` points to an
         // allocation with the layout of current capacity.
         let _dealloc =
-            unsafe { Dealloc(self.allocation(), Self::layout(self.capacity())) };
+            unsafe { Dealloc(self.allocation_mut(), Self::layout(self.capacity())) };
 
         unsafe {
             // Safety:
@@ -1164,9 +1173,9 @@ fn capacity_overflow() -> ! {
 }
 
 #[cold]
-fn ref_count_overflow<T>(ptr: NonNull<u8>, len: usize) -> ! {
+fn ref_count_overflow<T>(ptr: NonNull<T>, len: usize) -> ! {
     // Drop to decrement the ref count to counter the increment in `clone()`
-    drop(EcoVec::<T> { ptr, len, phantom: PhantomData });
+    drop(EcoVec { ptr, len, phantom: PhantomData });
     panic!("reference count overflow");
 }
 
