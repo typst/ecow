@@ -686,11 +686,16 @@ impl<T> EcoVec<T> {
 impl<T: Clone> EcoVec<T> {
     /// Clones and pushes all elements in a trusted-len iterator to the vector.
     ///
-    /// The iterator must produce exactly `count` items.
-    unsafe fn extend_from_trusted<I>(&mut self, count: usize, iter: I)
+    /// # Safety
+    /// `ExactSizeIterator::len` must return the exact length of the iterator.
+    pub unsafe fn extend_from_trusted<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
     {
+        let iter = iter.into_iter();
+        let count = iter.len();
+
         if count == 0 {
             return;
         }
@@ -965,7 +970,7 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
         let mut vec = Self::new();
         unsafe {
             // Safety: Array's IntoIter implements `TrustedLen`.
-            vec.extend_from_trusted(array.len(), array);
+            vec.extend_from_trusted(array);
         }
         vec
     }
@@ -977,7 +982,7 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
         let mut vec = Self::new();
         unsafe {
             // Safety: Vec's IntoIter implements `TrustedLen`.
-            vec.extend_from_trusted(other.len(), other);
+            vec.extend_from_trusted(other);
         }
         vec
     }
