@@ -1,6 +1,5 @@
 //! A clone-on-write alternative to [`Vec`].
 
-use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
@@ -10,6 +9,9 @@ use core::marker::PhantomData;
 use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
 

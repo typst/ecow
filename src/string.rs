@@ -1,12 +1,14 @@
 //! A clone-on-write, small-string-optimized alternative to [`String`].
 
 use alloc::borrow::Cow;
-use alloc::string::String;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
+
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
 
 use crate::dynamic::{DynamicVec, InlineVec};
 
