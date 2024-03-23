@@ -490,6 +490,37 @@ impl<T: Clone> EcoVec<T> {
             }
         }
     }
+
+    /// Pushes all elements in a trusted-len iterator to the vector.
+    ///
+    /// # Safety
+    /// We can't use `TrustedLen` because it is unstable. Still, the
+    /// `ExactSizeIterator::len` must return the exact length of the iterator
+    /// for this to be safe.
+    pub unsafe fn extend_from_trusted<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let iter = iter.into_iter();
+        let count = iter.len();
+
+        if count == 0 {
+            return;
+        }
+
+        self.reserve(count);
+
+        for value in iter {
+            // Safety:
+            // - The reference count is `1` because of `reserve`.
+            // - `self.len < self.capacity()` because we reserved space for
+            //   `iter.len()` more elements.
+            unsafe {
+                self.push_unchecked(value);
+            }
+        }
+    }
 }
 
 impl<T> EcoVec<T> {
@@ -686,35 +717,6 @@ impl<T> EcoVec<T> {
 }
 
 impl<T: Clone> EcoVec<T> {
-    /// Clones and pushes all elements in a trusted-len iterator to the vector.
-    ///
-    /// # Safety
-    /// `ExactSizeIterator::len` must return the exact length of the iterator.
-    pub unsafe fn extend_from_trusted<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = T>,
-        I::IntoIter: ExactSizeIterator,
-    {
-        let iter = iter.into_iter();
-        let count = iter.len();
-
-        if count == 0 {
-            return;
-        }
-
-        self.reserve(count);
-
-        for value in iter {
-            // Safety:
-            // - The reference count is `1` because of `reserve`.
-            // - `self.len < self.capacity()` because we reserved space for
-            //   `slice.len()` more elements.
-            unsafe {
-                self.push_unchecked(value);
-            }
-        }
-    }
-
     /// Ensure that this vector has a unique backing allocation.
     ///
     /// May change the capacity.
