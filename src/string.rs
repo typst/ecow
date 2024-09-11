@@ -447,6 +447,13 @@ impl From<&String> for EcoString {
     }
 }
 
+impl From<&EcoString> for EcoString {
+    #[inline]
+    fn from(s: &EcoString) -> Self {
+        s.clone()
+    }
+}
+
 impl From<Cow<'_, str>> for EcoString {
     #[inline]
     fn from(s: Cow<str>) -> Self {
