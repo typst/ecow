@@ -132,7 +132,7 @@ impl DynamicVec {
         match self.variant_mut() {
             VariantMut::Inline(inline) => {
                 if inline.push(byte).is_err() {
-                    let mut eco = EcoVec::with_capacity(inline.len() + 1);
+                    let mut eco = EcoVec::with_capacity(LIMIT * 2);
                     eco.extend_from_byte_slice(self.as_slice());
                     eco.push(byte);
                     *self = Self::from_eco(eco);
@@ -149,7 +149,8 @@ impl DynamicVec {
         match self.variant_mut() {
             VariantMut::Inline(inline) => {
                 if inline.extend_from_slice(bytes).is_err() {
-                    let mut eco = EcoVec::with_capacity(inline.len() + bytes.len());
+                    let needed = inline.len() + bytes.len();
+                    let mut eco = EcoVec::with_capacity(needed.next_power_of_two());
                     eco.extend_from_byte_slice(self.as_slice());
                     eco.extend_from_byte_slice(bytes);
                     *self = Self::from_eco(eco);
