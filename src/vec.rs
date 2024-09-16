@@ -105,6 +105,8 @@ struct Header {
 
 impl<T> EcoVec<T> {
     /// Create a new, empty vector.
+    ///
+    /// This does not allocate.
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -114,7 +116,7 @@ impl<T> EcoVec<T> {
         }
     }
 
-    /// Create a new, empty vec with at least the specified capacity.
+    /// Create a new, empty vector with at least the specified capacity.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let mut vec = Self::new();
