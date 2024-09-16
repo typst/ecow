@@ -3,6 +3,9 @@
 // RUSTFLAGS="--cfg loom" cargo test --release loom --features loom
 // ```
 
+// See https://github.com/tokio-rs/loom/issues/352
+#![allow(unknown_lints, unexpected_cfgs)]
+
 #[cfg(loom)]
 mod loom {
     #[cfg(debug_assertions)]

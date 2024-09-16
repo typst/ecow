@@ -40,6 +40,8 @@ assert_eq!(third, "Welcome to earth! ");
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
+// See https://github.com/tokio-rs/loom/issues/352
+#![allow(unknown_lints, unexpected_cfgs)]
 
 extern crate alloc;
 
