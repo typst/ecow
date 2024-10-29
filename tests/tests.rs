@@ -294,6 +294,24 @@ fn test_vec_clear_drop_panic() {
 }
 
 #[test]
+fn test_array_from_vec() {
+    let array = [String::from("foo"), String::from("bar")];
+    let a = EcoVec::from(array.clone());
+    let b = a.clone();
+    let c: [String; 2] = a.try_into().unwrap();
+    assert_eq!(b, c);
+    let d = b.clone();
+    assert_eq!(c, array);
+    assert_eq!(d, array);
+    drop(b);
+    assert_eq!(c, array);
+    drop(d);
+    assert_eq!(c, array);
+
+    assert_eq!(<[String; 0]>::try_from(EcoVec::new()).unwrap(), <[String; 0]>::default());
+}
+
+#[test]
 fn test_str_new() {
     // Test inline strings.
     assert_eq!(EcoString::new(), "");

@@ -1,6 +1,7 @@
 //! A clone-on-write alternative to [`Vec`].
 
 use core::alloc::Layout;
+use core::array;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Formatter};
@@ -991,6 +992,26 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
             vec.extend_from_trusted(other);
         }
         vec
+    }
+}
+
+impl<T: Clone, const N: usize> TryFrom<EcoVec<T>> for [T; N] {
+    type Error = EcoVec<T>;
+    fn try_from(mut vec: EcoVec<T>) -> Result<Self, Self::Error> {
+        if vec.len() != N {
+            return Err(vec);
+        }
+        let arr = if vec.is_unique() {
+            // Safety: We know that the length is correct and the vector is unique.
+            let arr = unsafe { ptr::read(vec.data() as *const [T; N]) };
+            // Set the length to zero to prevent double drop.
+            vec.len = 0;
+            arr
+        } else {
+            // Safety: We know that the length is correct.
+            unsafe { array::from_fn(|i| vec.get_unchecked(i).clone()) }
+        };
+        Ok(arr)
     }
 }
 
