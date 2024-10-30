@@ -997,21 +997,26 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
 
 impl<T: Clone, const N: usize> TryFrom<EcoVec<T>> for [T; N] {
     type Error = EcoVec<T>;
+
     fn try_from(mut vec: EcoVec<T>) -> Result<Self, Self::Error> {
         if vec.len() != N {
             return Err(vec);
         }
-        let arr = if vec.is_unique() {
-            // Safety: We know that the length is correct and the vector is unique.
-            let arr = unsafe { ptr::read(vec.data() as *const [T; N]) };
+
+        Ok(if vec.is_unique() {
             // Set the length to zero to prevent double drop.
             vec.len = 0;
-            arr
+
+            // Safety:
+            // - We have unique ownership over the underlying allocation.
+            // - The pointer returned by `data()` is valid for `N` reads.
+            // - We take ownership of the value and don't drop it again
+            //   in our drop impl.
+            unsafe { ptr::read(vec.data() as *const [T; N]) }
         } else {
             // Safety: We know that the length is correct.
             unsafe { array::from_fn(|i| vec.get_unchecked(i).clone()) }
-        };
-        Ok(arr)
+        })
     }
 }
 
