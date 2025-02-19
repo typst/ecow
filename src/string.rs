@@ -168,6 +168,42 @@ impl EcoString {
         self.0.clear();
     }
 
+    /// Shortens the string to the specified length.
+    ///
+    /// If `new_len` is greater than or equal to the string's current length,
+    /// this has no effect.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `new_len` does not lie on a [`char`] boundary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ecow::EcoString;
+    ///
+    /// let mut s = EcoString::from("hello");
+    ///
+    /// s.truncate(2);
+    ///
+    /// assert_eq!("he", s);
+    /// ```
+    ///
+    /// ```should_panic
+    /// use ecow::EcoString;
+    ///
+    /// let mut s = EcoString::from("Poincaré duality");
+    ///
+    /// s.truncate(8);
+    /// ```
+    #[inline]
+    pub fn truncate(&mut self, new_len: usize) {
+        if new_len <= self.len() {
+            assert!(self.is_char_boundary(new_len));
+            self.0.truncate(new_len)
+        }
+    }
+
     /// Replaces all matches of a string with another string.
     ///
     /// This is a bit less general that [`str::replace`] because the `Pattern`
