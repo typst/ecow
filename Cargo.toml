@@ -1,6 +1,6 @@
 [package]
 name = "ecow"
-version = "0.2.3"
+version = "0.2.4"
 rust-version = "1.73" # also change in ci.yml
 authors = ["Laurenz <laurmaedje@gmail.com>"]
 edition = "2021"
