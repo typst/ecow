@@ -548,7 +548,7 @@ mod serde {
         {
             struct EcoStringVisitor;
 
-            impl<'a> Visitor<'a> for EcoStringVisitor {
+            impl Visitor<'_> for EcoStringVisitor {
                 type Value = EcoString;
 
                 fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

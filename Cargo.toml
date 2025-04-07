@@ -1,6 +1,7 @@
 [package]
 name = "ecow"
 version = "0.2.3"
+rust-version = "1.73" # also change in ci.yml
 authors = ["Laurenz <laurmaedje@gmail.com>"]
 edition = "2021"
 description = "Compact, clone-on-write vector and string."
