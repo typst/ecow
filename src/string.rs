@@ -6,6 +6,7 @@ use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
+use core::str::FromStr;
 
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
@@ -518,6 +519,15 @@ impl From<&EcoString> for String {
     #[inline]
     fn from(s: &EcoString) -> Self {
         s.as_str().into()
+    }
+}
+
+impl FromStr for EcoString {
+    type Err = core::convert::Infallible;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_str(s))
     }
 }
 
