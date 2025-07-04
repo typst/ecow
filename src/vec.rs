@@ -7,7 +7,7 @@ use core::cmp::Ordering;
 use core::fmt::{self, Debug, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
-use core::mem;
+use core::mem::{self, ManuallyDrop};
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
 
@@ -984,12 +984,15 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
 }
 
 impl<T: Clone> From<Vec<T>> for EcoVec<T> {
-    /// This needs to allocate to change the layout.
-    fn from(other: Vec<T>) -> Self {
-        let mut vec = Self::new();
+    /// Allocates a new EcoVec, and moves other's items into it.
+    fn from(mut other: Vec<T>) -> Self {
+        let mut vec = Self::with_capacity(other.len());
         unsafe {
-            // Safety: Vec's IntoIter implements `TrustedLen`.
-            vec.extend_from_trusted(other);
+            ptr::copy_nonoverlapping(other.as_mut_ptr(), vec.data_mut(), other.len());
+            vec.len = other.len();
+
+            // Avoids triggering drop on individual Vec items that were moved into the EcoVec.
+            other.set_len(0);
         }
         vec
     }
