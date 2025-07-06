@@ -7,7 +7,7 @@ use core::cmp::Ordering;
 use core::fmt::{self, Debug, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
-use core::mem::{self, ManuallyDrop};
+use core::mem;
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
 
