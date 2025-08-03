@@ -986,13 +986,21 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
 impl<T: Clone> From<Vec<T>> for EcoVec<T> {
     /// Allocates a new EcoVec, and moves other's items into it.
     fn from(mut other: Vec<T>) -> Self {
-        let mut vec = Self::with_capacity(other.len());
+        let len = other.len();
+        let mut vec = Self::with_capacity(len);
         unsafe {
-            ptr::copy_nonoverlapping(other.as_mut_ptr(), vec.data_mut(), other.len());
-            vec.len = other.len();
-
-            // Avoids triggering drop on individual Vec items that were moved into the EcoVec.
+            // Disables drop on individual Vec items that will be moved into the EcoVec.
+            // Safety: 0 is less than or equal to capacity.
             other.set_len(0);
+
+            // Safety:
+            // - The source is valid for len reads.
+            // - The destination is valid for len writes due to the `Self::with_capacity(len)` call.
+            // - The source and destination are non-overlapping because we just allocated the destination.
+            ptr::copy_nonoverlapping(other.as_mut_ptr(), vec.data_mut(), len);
+
+            // Enables drop on individual Vec items that have been moved into the EcoVec.
+            vec.len = len;
         }
         vec
     }
