@@ -997,7 +997,7 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
             // - The source is valid for len reads.
             // - The destination is valid for len writes due to the `Self::with_capacity(len)` call.
             // - The source and destination are non-overlapping because we just allocated the destination.
-            ptr::copy_nonoverlapping(other.as_mut_ptr(), vec.data_mut(), len);
+            ptr::copy_nonoverlapping(other.as_ptr(), vec.data_mut(), len);
 
             // Enables drop on individual Vec items that have been moved into the EcoVec.
             vec.len = len;
