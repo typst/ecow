@@ -989,17 +989,24 @@ impl<T: Clone> From<Vec<T>> for EcoVec<T> {
         let len = other.len();
         let mut vec = Self::with_capacity(len);
         unsafe {
-            // Disables drop on individual Vec items that will be moved into the EcoVec.
+            // Disables dropping of individual `Vec` items that will be moved
+            // into the `EcoVec`.
+            //
             // Safety: 0 is less than or equal to capacity.
             other.set_len(0);
 
             // Safety:
-            // - The source is valid for len reads.
-            // - The destination is valid for len writes due to the `Self::with_capacity(len)` call.
-            // - The source and destination are non-overlapping because we just allocated the destination.
+            // - The source vector is valid for `len` reads.
+            // - The destination is valid for `len` writes due to the
+            //   `Self::with_capacity(len)` call.
+            // - The source and destination are non-overlapping because we just
+            //   allocated the destination.
             ptr::copy_nonoverlapping(other.as_ptr(), vec.data_mut(), len);
 
-            // Enables drop on individual Vec items that have been moved into the EcoVec.
+            // Sets the correct length, and thereby also enables dropping of the
+            // individual items that have been moved into the `EcoVec`.
+            // There is no possiblity of double dropping because we've already
+            // set the length of the original `Vec` to 0 before copying.
             vec.len = len;
         }
         vec
