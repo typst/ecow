@@ -50,6 +50,23 @@ fn test_vec_construction() {
 }
 
 #[test]
+fn test_from_vec_rc() {
+    use std::rc::Rc;
+
+    let x = Rc::new(());
+    let v = vec![x.clone()];
+    assert_eq!(Rc::strong_count(&x), 2);
+
+    let vec = EcoVec::from(v);
+    assert_eq!(Rc::strong_count(&x), 2, "Rc count should not change");
+    assert_eq!(vec.len(), 1);
+    assert!(Rc::ptr_eq(&x, &vec[0]));
+
+    std::mem::drop(vec);
+    assert_eq!(Rc::strong_count(&x), 1);
+}
+
+#[test]
 fn test_vec_with_capacity() {
     let mut vec = EcoVec::with_capacity(3);
     assert_eq!(vec.capacity(), 3);

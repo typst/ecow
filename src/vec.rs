@@ -984,12 +984,30 @@ impl<T: Clone, const N: usize> From<[T; N]> for EcoVec<T> {
 }
 
 impl<T: Clone> From<Vec<T>> for EcoVec<T> {
-    /// This needs to allocate to change the layout.
-    fn from(other: Vec<T>) -> Self {
-        let mut vec = Self::new();
+    /// Allocates a new EcoVec, and moves other's items into it.
+    fn from(mut other: Vec<T>) -> Self {
+        let len = other.len();
+        let mut vec = Self::with_capacity(len);
         unsafe {
-            // Safety: Vec's IntoIter implements `TrustedLen`.
-            vec.extend_from_trusted(other);
+            // Disables dropping of individual `Vec` items that will be moved
+            // into the `EcoVec`.
+            //
+            // Safety: 0 is less than or equal to capacity.
+            other.set_len(0);
+
+            // Safety:
+            // - The source vector is valid for `len` reads.
+            // - The destination is valid for `len` writes due to the
+            //   `Self::with_capacity(len)` call.
+            // - The source and destination are non-overlapping because we just
+            //   allocated the destination.
+            ptr::copy_nonoverlapping(other.as_ptr(), vec.data_mut(), len);
+
+            // Sets the correct length, and thereby also enables dropping of the
+            // individual items that have been moved into the `EcoVec`.
+            // There is no possiblity of double dropping because we've already
+            // set the length of the original `Vec` to 0 before copying.
+            vec.len = len;
         }
         vec
     }
