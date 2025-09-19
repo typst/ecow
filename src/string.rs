@@ -7,6 +7,10 @@ use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
 use core::str::FromStr;
+#[cfg(feature = "std")]
+use std::ffi::OsStr;
+#[cfg(feature = "std")]
+use std::path::Path;
 
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
@@ -429,6 +433,29 @@ impl Borrow<str> for EcoString {
     #[inline]
     fn borrow(&self) -> &str {
         self
+    }
+}
+
+impl AsRef<[u8]> for EcoString {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_str().as_bytes()
+    }
+}
+
+#[cfg(feature = "std")]
+impl AsRef<OsStr> for EcoString {
+    #[inline]
+    fn as_ref(&self) -> &OsStr {
+        self.as_str().as_ref()
+    }
+}
+
+#[cfg(feature = "std")]
+impl AsRef<Path> for EcoString {
+    #[inline]
+    fn as_ref(&self) -> &Path {
+        self.as_str().as_ref()
     }
 }
 
