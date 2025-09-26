@@ -514,6 +514,17 @@ impl FromIterator<char> for EcoString {
     }
 }
 
+impl<'a> FromIterator<&'a str> for EcoString {
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
+        let mut s = Self::new();
+        for sub in iter {
+            s.push_str(sub);
+        }
+        s
+    }
+}
+
 impl FromIterator<Self> for EcoString {
     #[inline]
     fn from_iter<T: IntoIterator<Item = Self>>(iter: T) -> Self {

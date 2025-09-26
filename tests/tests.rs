@@ -473,6 +473,10 @@ fn test_str_construction() {
 
     assert_eq!(str_from_eco_string, str_from_eco_string_ref);
     assert_eq!(str_from_eco_string_ref, "foo");
+
+    let from_string_iter: EcoString = ["foo", " ", "bar"].into_iter().collect();
+
+    assert_eq!(from_string_iter, "foo bar");
 }
 
 #[test]
