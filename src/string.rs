@@ -517,11 +517,9 @@ impl FromIterator<char> for EcoString {
 impl<'a> FromIterator<&'a str> for EcoString {
     #[inline]
     fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
-        let mut s = Self::new();
-        for sub in iter {
-            s.push_str(sub);
-        }
-        s
+        let mut buf = Self::new();
+        buf.extend(iter);
+        buf
     }
 }
 
@@ -542,6 +540,13 @@ impl Extend<char> for EcoString {
         for c in iter {
             self.push(c);
         }
+    }
+}
+
+impl<'a> Extend<&'a str> for EcoString {
+    #[inline]
+    fn extend<T: IntoIterator<Item = &'a str>>(&mut self, iter: T) {
+        iter.into_iter().for_each(move |s| self.push_str(s));
     }
 }
 

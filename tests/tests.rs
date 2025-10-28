@@ -484,7 +484,9 @@ fn test_str_extend() {
     let mut s = EcoString::from("Hello, ");
     s.extend("world!".chars());
 
-    assert_eq!(s, "Hello, world!");
+    s.extend([" How ", "are ", "you", "?"]);
+
+    assert_eq!(s, "Hello, world! How are you?");
 }
 
 #[test]
