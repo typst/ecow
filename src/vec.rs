@@ -1128,6 +1128,13 @@ impl<T> IntoIter<T> {
     }
 }
 
+impl<T: Clone> Clone for IntoIter<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        EcoVec::from(self.as_slice()).into_iter()
+    }
+}
+
 impl<T: Clone> Iterator for IntoIter<T> {
     type Item = T;
 

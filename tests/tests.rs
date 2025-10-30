@@ -223,9 +223,13 @@ fn test_vec_into_iter() {
     let mut iter = first.into_iter();
     assert_eq!(iter.len(), 3);
     assert_eq!(iter.next(), Some(v(2)));
+    let mut second_iter = iter.clone();
     assert_eq!(iter.next_back(), Some(v(5)));
     assert_eq!(iter.as_slice(), [v(4)]);
+    assert_eq!(second_iter.next_back(), Some(v(5)));
+    assert_eq!(second_iter.as_slice(), [v(4)]);
     drop(iter);
+    drop(second_iter);
 }
 
 #[test]
