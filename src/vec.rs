@@ -378,7 +378,7 @@ impl<T: Clone> EcoVec<T> {
     ///
     /// Clones the vector if its reference count is larger than 1.
     ///
-    /// Note that this clones the vector even if `f` always returns `false`. To
+    /// Note that this clones the vector even if `f` always returns `true`. To
     /// prevent that, you can first iterate over the vector yourself and then
     /// only call `retain` if your condition is `false` for some element.
     pub fn retain<F>(&mut self, mut f: F)
