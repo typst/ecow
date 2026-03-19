@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 
 use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
 use crate::vendor::slice;
-use crate::vendor::vec::Drain;
+use crate::vendor::vec::{Drain, Splice};
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
@@ -466,6 +466,22 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
+    /// Creates a splicing iterator that replaces the specified range in the vector
+    /// with the given `replace_with` iterator and yields the removed items.
+    ///
+    /// The vector will be cloned if its reference count is larger than 1.
+    #[inline]
+    pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter>
+    where
+        R: RangeBounds<usize>,
+        I: IntoIterator<Item = T>,
+    {
+        Splice {
+            drain: self.drain(range),
+            replace_with: replace_with.into_iter(),
+        }
+    }
+
     /// Reserve space for at least `additional` more elements.
     ///
     /// Guarantees that the resulting vector has reference count `1` and space
@@ -475,16 +491,7 @@ impl<T: Clone> EcoVec<T> {
         let mut target = capacity;
 
         if additional > capacity - self.len {
-            // Reserve at least the `additional` capacity, but also at least
-            // double the capacity to ensure exponential growth and finally
-            // jump directly to a minimum capacity to prevent frequent
-            // reallocation for small vectors.
-            target = self
-                .len
-                .checked_add(additional)
-                .unwrap_or_else(|| capacity_overflow())
-                .max(2 * capacity)
-                .max(Self::min_cap());
+            target = Self::amortized_cap(self.len, additional, capacity);
         }
 
         if !self.is_unique() {
@@ -789,6 +796,20 @@ impl<T> EcoVec<T> {
         } else {
             1
         }
+    }
+
+    /// Compute the new amortized capacity when growing the allocation.
+    ///
+    /// Reserve at least the `additional` capacity, but also at least
+    /// double the capacity to ensure exponential growth and finally
+    /// jump directly to a minimum capacity to prevent frequent
+    /// reallocation for small vectors.
+    #[inline]
+    pub(crate) fn amortized_cap(len: usize, additional: usize, capacity: usize) -> usize {
+        len.checked_add(additional)
+            .unwrap_or_else(|| capacity_overflow())
+            .max(2 * capacity)
+            .max(Self::min_cap())
     }
 }
 

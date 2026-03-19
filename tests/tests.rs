@@ -225,6 +225,27 @@ fn test_vec_drain() {
 }
 
 #[test]
+fn test_vec_splice() {
+    let mut vec = eco_vec!["a"; 6];
+    // Inserted iterator is smaller.
+    vec.splice(2..4, ["b"; 1]);
+    assert_eq!(vec, ["a", "a", "b", "a", "a"]);
+
+    // Inserted iterator is larger.
+    let mut cloned = vec.clone();
+    cloned.splice(3..4, ["c"; 3]);
+    assert_eq!(cloned, ["a", "a", "b", "c", "c", "c", "a"]);
+
+    // Inserted iterator is the same size.
+    cloned.splice(2..6, ["d"; 4]);
+    assert_eq!(cloned, ["a", "a", "d", "d", "d", "d", "a"]);
+
+    // Insert an interator that doesn't have exact size hints.
+    cloned.splice(1..6, ["e"; 3].into_iter().filter(|_| true));
+    assert_eq!(cloned, ["a", "e", "e", "e", "a"]);
+}
+
+#[test]
 fn test_vec_extend() {
     let mut vec = EcoVec::new();
     vec.extend_from_slice(&[]);
