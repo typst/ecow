@@ -9,12 +9,15 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem;
 use core::ops::Deref;
+use core::ops::{Range, RangeBounds};
 use core::ptr::{self, NonNull};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
+use crate::vendor::slice;
+use crate::vendor::vec::Drain;
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
@@ -420,22 +423,46 @@ impl<T: Clone> EcoVec<T> {
             return;
         }
 
-        let rest = self.len - target;
         unsafe {
-            // Safety:
-            // - Since `target < len`, we maintain `len <= capacity`.
-            self.len = target;
+            // Safety: reference count is `1` and `target < len`.
+            self.truncate_unchecked(target);
+        }
+    }
 
-            // Safety:
-            // The reference count is `1` because of `make_unique`.
-            // - The pointer returned by `data_mut()` is valid for `capacity`
-            //   writes.
-            // - We have the invariant `len <= capacity`.
-            // - Thus, `data_mut() + target` is valid for `len - target` writes.
-            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
-                self.data_mut().add(target),
-                rest,
-            ));
+    /// Removes the subslice indicated by the given range from the vector,
+    /// returning a double-ended iterator over the removed subslice.
+    ///
+    /// The vector will be cloned if its reference count is larger than 1.
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
+    where
+        R: RangeBounds<usize>,
+    {
+        // Memory safety
+        //
+        // When the Drain is first created, it shortens the length of
+        // the source vector to make sure no uninitialized or moved-from elements
+        // are accessible at all if the Drain's destructor never gets to run.
+        //
+        // Drain will ptr::read out the values to remove.
+        // When finished, remaining tail of the vec is copied back to cover
+        // the hole, and the vector length is restored to the new length.
+        //
+        let len = self.len();
+        let Range { start, end } = slice::range(range, ..len);
+
+        self.make_unique();
+
+        unsafe {
+            // set self.vec length's to start, to be safe in case Drain is leaked
+            self.len = start;
+            let range_slice =
+                core::slice::from_raw_parts(self.ptr.as_ptr().add(start), end - start);
+            Drain {
+                tail_start: end,
+                tail_len: len - end,
+                iter: range_slice.iter(),
+                vec: NonNull::from(self),
+            }
         }
     }
 
@@ -527,12 +554,58 @@ impl<T: Clone> EcoVec<T> {
 }
 
 impl<T> EcoVec<T> {
+    /// Forces the length of the vector to `new_len`.
+    ///
+    /// # Safety
+    /// - `new_len` must be less than or equal to [`Self::capacity()`].
+    /// - The elements at `old_len..new_len` must be initialized.
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        self.len = new_len;
+    }
+
+    /// Returns a raw pointer to the vector's buffer, or a dangling raw pointer
+    /// valid for zero sized reads if the vector didn't allocate.
+    pub fn as_ptr(&self) -> *const T {
+        self.ptr.as_ptr()
+    }
+
+    /// Returns a raw mutable pointer to the vector's buffer, or a dangling
+    /// raw pointer valid for zero sized reads if the vector didn't allocate.
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.ptr.as_ptr()
+    }
+
+    /// # Safety
+    ///
+    /// May only be called if:
+    /// - the reference count is `1`, and
+    /// - `target < len` (i.e., this methods shrinks, it doesn't grow).
+    pub(crate) unsafe fn truncate_unchecked(&mut self, target: usize) {
+        let rest = self.len - target;
+        unsafe {
+            // Safety:
+            // - Since `target < len`, we maintain `len <= capacity`.
+            self.len = target;
+
+            // Safety:
+            // The reference count is `1` because of `make_unique`.
+            // - The pointer returned by `data_mut()` is valid for `capacity`
+            //   writes.
+            // - We have the invariant `len <= capacity`.
+            // - Thus, `data_mut() + target` is valid for `len - target` writes.
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                self.data_mut().add(target),
+                rest,
+            ));
+        }
+    }
+
     /// Grow the capacity to at least the `target` size.
     ///
     /// May only be called if:
     /// - the reference count is `1`, and
     /// - `target > capacity` (i.e., this methods grows, it doesn't shrink).
-    unsafe fn grow(&mut self, mut target: usize) {
+    pub(crate) unsafe fn grow(&mut self, mut target: usize) {
         debug_assert!(self.is_unique());
         debug_assert!(target > self.capacity());
 

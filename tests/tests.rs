@@ -204,6 +204,27 @@ fn test_vec_truncate() {
 }
 
 #[test]
+fn test_vec_drain() {
+    let mut vec = EcoVec::from_elem(v("a"), 10);
+    vec.drain(3..6);
+    assert_eq!(vec.len(), 7);
+
+    // Manually pull an item, before dropping the drain.
+    let mut drain = vec.drain(5..);
+    drain.next();
+    drop(drain);
+    assert_eq!(vec.len(), 5);
+
+    let mut cloned = vec.clone();
+    cloned.drain(..2);
+    assert_eq!(cloned.len(), 3);
+
+    let drained = cloned.drain(..).collect::<Vec<_>>();
+    assert_eq!(drained.len(), 3);
+    assert_eq!(cloned, []);
+}
+
+#[test]
 fn test_vec_extend() {
     let mut vec = EcoVec::new();
     vec.extend_from_slice(&[]);
