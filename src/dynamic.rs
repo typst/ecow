@@ -1,5 +1,6 @@
 use core::mem::{self, ManuallyDrop};
 use core::ptr;
+use std::ops::RangeBounds;
 
 use super::EcoVec;
 
@@ -163,6 +164,26 @@ impl DynamicVec {
     }
 
     #[inline]
+    pub fn insert_slice(&mut self, index: usize, bytes: &[u8]) {
+        match self.variant_mut() {
+            VariantMut::Inline(inline) => {
+                if inline.insert_slice(index, bytes).is_err() {
+                    let needed = inline.len() + bytes.len();
+                    let mut eco = EcoVec::with_capacity(needed.next_power_of_two());
+                    let (a, b) = inline.as_slice().split_at(index);
+                    eco.extend_from_byte_slice(a);
+                    eco.extend_from_byte_slice(bytes);
+                    eco.extend_from_byte_slice(b);
+                    *self = Self::from_eco(eco);
+                }
+            }
+            VariantMut::Spilled(spilled) => {
+                spilled.splice(index..index, bytes.iter().copied());
+            }
+        }
+    }
+
+    #[inline]
     pub fn clear(&mut self) {
         match self.variant_mut() {
             VariantMut::Inline(inline) => inline.clear(),
@@ -175,6 +196,19 @@ impl DynamicVec {
         match self.variant_mut() {
             VariantMut::Inline(inline) => inline.truncate(target),
             VariantMut::Spilled(spilled) => spilled.truncate(target),
+        }
+    }
+
+    #[inline]
+    pub fn remove_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<usize>,
+    {
+        match self.variant_mut() {
+            VariantMut::Inline(inline) => inline.remove_range(range),
+            VariantMut::Spilled(spilled) => {
+                spilled.drain(range);
+            }
         }
     }
 }
@@ -350,6 +384,37 @@ impl InlineVec {
     }
 
     #[inline]
+    pub fn insert_slice(&mut self, index: usize, bytes: &[u8]) -> Result<(), ()> {
+        let len = self.len();
+        assert!(index <= len, "index {index} out of range for slice of length {len}");
+
+        let grown = len + bytes.len();
+        let tail_len = len - index;
+        if grown <= LIMIT {
+            let ptr = self.buf.as_mut_ptr();
+            unsafe {
+                // Safety: Checked that `index <= len` and
+                // `len + bytes.len() == grown < LIMIT`.
+                core::ptr::copy(ptr.add(index), ptr.add(index + bytes.len()), tail_len);
+
+                // Safety: Checked that `index <= len` and
+                // `len + bytes.len() == grown < LIMIT`.
+                core::ptr::copy_nonoverlapping(
+                    bytes.as_ptr(),
+                    ptr.add(index),
+                    bytes.len(),
+                );
+
+                // Safety: Checked that `grown < LIMIT`
+                self.set_len(grown);
+            }
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    #[inline]
     pub fn truncate(&mut self, target: usize) {
         if target < self.len() {
             unsafe {
@@ -357,6 +422,27 @@ impl InlineVec {
                 // which cannot exceed LIMIT itself.
                 self.set_len(target);
             }
+        }
+    }
+
+    #[inline]
+    pub fn remove_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<usize>,
+    {
+        let len = self.len();
+        let range = crate::vendor::slice::range(range, ..len);
+
+        let tail_len = len - range.end;
+        let target = len - range.len();
+        let ptr = self.buf.as_mut_ptr();
+        unsafe {
+            // Safety: The range is in bounds
+            core::ptr::copy(ptr.add(range.end), ptr.add(range.start), tail_len);
+
+            // Safety: Checked that it's smaller than the current length,
+            // which cannot exceed LIMIT itself.
+            self.set_len(target);
         }
     }
 }

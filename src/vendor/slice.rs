@@ -38,7 +38,7 @@ where
 #[cfg_attr(not(panic = "immediate-abort"), inline(never), cold)]
 #[cfg_attr(panic = "immediate-abort", inline)]
 #[track_caller]
-fn slice_index_fail(start: usize, end: usize, len: usize) -> ! {
+pub(crate) fn slice_index_fail(start: usize, end: usize, len: usize) -> ! {
     if start > len {
         panic!("range start index {start} out of range for slice of length {len}");
     }

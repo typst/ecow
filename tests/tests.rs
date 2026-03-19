@@ -418,6 +418,36 @@ fn test_str_push() {
 }
 
 #[test]
+fn test_str_insert() {
+    let mut v = EcoString::new();
+    v.insert(0, 'a');
+    v.insert(1, '😀');
+    v.insert_str(1, "bcd");
+    assert_eq!(v, "abcd😀");
+    assert_eq!(v.len(), 8);
+
+    // Test fully filling the inline storage.
+    v.insert_str(8, "efghijk");
+    assert_eq!(v.len(), 15);
+
+    // Test spilling with `insert`.
+    let mut a = v.clone();
+    assert_eq!(a, "abcd😀efghijk");
+    a.insert(8, '_');
+    assert_eq!(a, "abcd😀_efghijk");
+    assert_eq!(a.len(), 16);
+
+    // Test spilling with `insert_str`.
+    let mut b = v.clone();
+    b.insert_str(2, "._.");
+    assert_eq!(b, "ab._.cd😀efghijk");
+    assert_eq!(b.len(), 18);
+
+    // v should be unchanged.
+    assert_eq!(v.len(), 15);
+}
+
+#[test]
 fn test_str_pop() {
     // Test with inline string.
     let mut v = EcoString::from("Hello World!");
@@ -437,6 +467,30 @@ fn test_str_pop() {
     // Test with large string.
     let mut v = EcoString::from(ALPH);
     assert_eq!(v.pop(), Some('z'));
+    assert_eq!(v.len(), 25);
+}
+
+#[test]
+fn test_str_remove() {
+    // Test with inline string.
+    let mut v = EcoString::from("Hello World!");
+    assert_eq!(v.remove(0), 'H');
+    assert_eq!(v, "ello World!");
+
+    // Remove one-by-one.
+    for i in (4..10).rev() {
+        v.remove(i);
+    }
+    assert_eq!(v, "ello!");
+
+    for _ in 0..5 {
+        v.remove(0);
+    }
+    assert!(v.is_empty());
+
+    // Test with large string.
+    let mut v = EcoString::from(ALPH);
+    assert_eq!(v.remove(21), 'v');
     assert_eq!(v.len(), 25);
 }
 
