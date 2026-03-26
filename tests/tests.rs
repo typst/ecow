@@ -9,6 +9,7 @@ use std::fmt::Write;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
+use ecow::string::ToEcoString;
 use ecow::{eco_vec, EcoString, EcoVec};
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
@@ -624,4 +625,10 @@ fn test_str_complex() {
 
     assert_eq!(hash_map.get("foo").unwrap(), &["bar".into(), "foo".into(), "foo".into()]);
     assert_eq!(hash_map.get("bar").unwrap(), &["bar".into()]);
+}
+
+#[test]
+fn test_str_to_eco_string() {
+    let num = 123456789;
+    assert_eq!(num.to_eco_string(), "123456789");
 }
