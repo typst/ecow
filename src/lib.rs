@@ -49,6 +49,7 @@ pub mod string;
 pub mod vec;
 
 mod dynamic;
+mod vendor;
 
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;

@@ -158,6 +158,18 @@ impl EcoString {
         self.0.extend_from_slice(string.as_bytes());
     }
 
+    /// Insert the given character at the index.
+    pub fn insert(&mut self, index: usize, c: char) {
+        assert!(self.is_char_boundary(index));
+        self.0.insert_slice(index, c.encode_utf8(&mut [0; 4]).as_bytes());
+    }
+
+    /// Insert the given string slice at the index.
+    pub fn insert_str(&mut self, index: usize, string: &str) {
+        assert!(self.is_char_boundary(index));
+        self.0.insert_slice(index, string.as_bytes());
+    }
+
     /// Remove the last character from the string.
     #[inline]
     pub fn pop(&mut self) -> Option<char> {
@@ -185,6 +197,14 @@ impl EcoString {
             assert!(self.is_char_boundary(new_len));
             self.0.truncate(new_len);
         }
+    }
+
+    /// Remove the character at the index.
+    pub fn remove(&mut self, index: usize) -> char {
+        assert!(self.is_char_boundary(index));
+        let char = self[index..].chars().next().unwrap();
+        self.0.remove_range(index..index + char.len_utf8());
+        char
     }
 
     /// Replaces all matches of a string with another string.
