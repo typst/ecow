@@ -594,6 +594,21 @@ impl FromStr for EcoString {
     }
 }
 
+/// A trait for converting a value to an [`EcoString`].
+///
+/// This trait is automatically implemented for any type which implements the
+/// [`Display`] trait.
+pub trait ToEcoString {
+    /// Converts the given value to an [`EcoString`].
+    fn to_eco_string(&self) -> EcoString;
+}
+
+impl<T: Display + ?Sized> ToEcoString for T {
+    fn to_eco_string(&self) -> EcoString {
+        eco_format!("{self}")
+    }
+}
+
 #[cold]
 const fn exceeded_inline_capacity() -> ! {
     panic!("exceeded inline capacity");
