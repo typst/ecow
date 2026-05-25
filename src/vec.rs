@@ -1,5 +1,7 @@
 //! A clone-on-write alternative to [`Vec`].
 
+pub use crate::vendor::vec::{Drain, Splice};
+
 use core::alloc::Layout;
 use core::array;
 use core::borrow::Borrow;
@@ -17,7 +19,6 @@ use alloc::vec::Vec;
 
 use crate::sync::atomic::{self, AtomicUsize, Ordering::*};
 use crate::vendor::slice;
-use crate::vendor::vec::{Drain, Splice};
 
 /// Create a new [`EcoVec`] with the given elements.
 /// ```
@@ -581,19 +582,19 @@ impl<T> EcoVec<T> {
     /// # Safety
     /// - `new_len` must be less than or equal to [`Self::capacity()`].
     /// - The elements at `old_len..new_len` must be initialized.
-    pub unsafe fn set_len(&mut self, new_len: usize) {
+    pub(crate) unsafe fn set_len(&mut self, new_len: usize) {
         self.len = new_len;
     }
 
     /// Returns a raw pointer to the vector's buffer, or a dangling raw pointer
     /// valid for zero sized reads if the vector didn't allocate.
-    pub fn as_ptr(&self) -> *const T {
+    pub(crate) fn as_ptr(&self) -> *const T {
         self.ptr.as_ptr()
     }
 
     /// Returns a raw mutable pointer to the vector's buffer, or a dangling
     /// raw pointer valid for zero sized reads if the vector didn't allocate.
-    pub fn as_mut_ptr(&mut self) -> *mut T {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut T {
         self.ptr.as_ptr()
     }
 
