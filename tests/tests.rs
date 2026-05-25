@@ -204,6 +204,48 @@ fn test_vec_truncate() {
 }
 
 #[test]
+fn test_vec_drain() {
+    let mut vec = EcoVec::from_elem(v("a"), 10);
+    vec.drain(3..6);
+    assert_eq!(vec.len(), 7);
+
+    // Manually pull an item, before dropping the drain.
+    let mut drain = vec.drain(5..);
+    drain.next();
+    drop(drain);
+    assert_eq!(vec.len(), 5);
+
+    let mut cloned = vec.clone();
+    cloned.drain(..2);
+    assert_eq!(cloned.len(), 3);
+
+    let drained = cloned.drain(..).collect::<Vec<_>>();
+    assert_eq!(drained.len(), 3);
+    assert_eq!(cloned, []);
+}
+
+#[test]
+fn test_vec_splice() {
+    let mut vec = eco_vec!["a"; 6];
+    // Inserted iterator is smaller.
+    vec.splice(2..4, ["b"; 1]);
+    assert_eq!(vec, ["a", "a", "b", "a", "a"]);
+
+    // Inserted iterator is larger.
+    let mut cloned = vec.clone();
+    cloned.splice(3..4, ["c"; 3]);
+    assert_eq!(cloned, ["a", "a", "b", "c", "c", "c", "a"]);
+
+    // Inserted iterator is the same size.
+    cloned.splice(2..6, ["d"; 4]);
+    assert_eq!(cloned, ["a", "a", "d", "d", "d", "d", "a"]);
+
+    // Insert an interator that doesn't have exact size hints.
+    cloned.splice(1..6, ["e"; 3].into_iter().filter(|_| true));
+    assert_eq!(cloned, ["a", "e", "e", "e", "a"]);
+}
+
+#[test]
 fn test_vec_extend() {
     let mut vec = EcoVec::new();
     vec.extend_from_slice(&[]);
@@ -376,6 +418,36 @@ fn test_str_push() {
 }
 
 #[test]
+fn test_str_insert() {
+    let mut v = EcoString::new();
+    v.insert(0, 'a');
+    v.insert(1, '😀');
+    v.insert_str(1, "bcd");
+    assert_eq!(v, "abcd😀");
+    assert_eq!(v.len(), 8);
+
+    // Test fully filling the inline storage.
+    v.insert_str(8, "efghijk");
+    assert_eq!(v.len(), 15);
+
+    // Test spilling with `insert`.
+    let mut a = v.clone();
+    assert_eq!(a, "abcd😀efghijk");
+    a.insert(8, '_');
+    assert_eq!(a, "abcd😀_efghijk");
+    assert_eq!(a.len(), 16);
+
+    // Test spilling with `insert_str`.
+    let mut b = v.clone();
+    b.insert_str(2, "._.");
+    assert_eq!(b, "ab._.cd😀efghijk");
+    assert_eq!(b.len(), 18);
+
+    // v should be unchanged.
+    assert_eq!(v.len(), 15);
+}
+
+#[test]
 fn test_str_pop() {
     // Test with inline string.
     let mut v = EcoString::from("Hello World!");
@@ -395,6 +467,30 @@ fn test_str_pop() {
     // Test with large string.
     let mut v = EcoString::from(ALPH);
     assert_eq!(v.pop(), Some('z'));
+    assert_eq!(v.len(), 25);
+}
+
+#[test]
+fn test_str_remove() {
+    // Test with inline string.
+    let mut v = EcoString::from("Hello World!");
+    assert_eq!(v.remove(0), 'H');
+    assert_eq!(v, "ello World!");
+
+    // Remove one-by-one.
+    for i in (4..10).rev() {
+        v.remove(i);
+    }
+    assert_eq!(v, "ello!");
+
+    for _ in 0..5 {
+        v.remove(0);
+    }
+    assert!(v.is_empty());
+
+    // Test with large string.
+    let mut v = EcoString::from(ALPH);
+    assert_eq!(v.remove(21), 'v');
     assert_eq!(v.len(), 25);
 }
 
