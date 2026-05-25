@@ -23,6 +23,7 @@ use crate::dynamic::{DynamicVec, InlineVec};
 /// assert_eq!(eco_format!("Hello, {}!", 123), "Hello, 123!");
 /// ```
 #[macro_export]
+#[clippy::format_args]
 macro_rules! eco_format {
     ($($tts:tt)*) => {{
         use ::std::fmt::Write;
