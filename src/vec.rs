@@ -424,7 +424,9 @@ impl<T: Clone> EcoVec<T> {
         }
 
         unsafe {
-            // Safety: reference count is `1` and `target < len`.
+            // Safety:
+            // - The reference count is `1` because of `is_unique`.
+            // - `target < len` because we checked this above.
             self.truncate_unchecked(target);
         }
     }
@@ -432,11 +434,15 @@ impl<T: Clone> EcoVec<T> {
     /// Removes the subslice indicated by the given range from the vector,
     /// returning a double-ended iterator over the removed subslice.
     ///
-    /// The vector will be cloned if its reference count is larger than 1.
+    /// Clones the vector if its reference count is larger than 1.
     pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
     where
         R: RangeBounds<usize>,
     {
+        // Adapted from Rust's `Vec::drain` function (MIT).
+        // Copyright (c) The Rust Project Contributors
+        // See NOTICE for full attribution.
+
         // Memory safety
         //
         // When the Drain is first created, it shortens the length of
@@ -466,16 +472,21 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Creates a splicing iterator that replaces the specified range in the vector
-    /// with the given `replace_with` iterator and yields the removed items.
+    /// Creates a splicing iterator that replaces the specified range in the
+    /// vector with the given `replace_with` iterator and yields the removed
+    /// items.
     ///
-    /// The vector will be cloned if its reference count is larger than 1.
+    /// Clones the vector if its reference count is larger than 1.
     #[inline]
     pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter>
     where
         R: RangeBounds<usize>,
         I: IntoIterator<Item = T>,
     {
+        // Adapted from Rust's `Vec::splice` function (MIT).
+        // Copyright (c) The Rust Project Contributors
+        // See NOTICE for full attribution.
+
         Splice {
             drain: self.drain(range),
             replace_with: replace_with.into_iter(),
@@ -595,7 +606,7 @@ impl<T> EcoVec<T> {
             self.len = target;
 
             // Safety:
-            // The reference count is `1` because of `make_unique`.
+            // - The caller must ensure that the reference count is `1`.
             // - The pointer returned by `data_mut()` is valid for `capacity`
             //   writes.
             // - We have the invariant `len <= capacity`.
@@ -800,10 +811,9 @@ impl<T> EcoVec<T> {
 
     /// Compute the new amortized capacity when growing the allocation.
     ///
-    /// Reserve at least the `additional` capacity, but also at least
-    /// double the capacity to ensure exponential growth and finally
-    /// jump directly to a minimum capacity to prevent frequent
-    /// reallocation for small vectors.
+    /// Reserves at least the `additional` capacity, but also at least double
+    /// the capacity to ensure exponential growth and finally jumps directly to
+    /// a minimum capacity to prevent frequent reallocation for small vectors.
     #[inline]
     pub(crate) fn amortized_cap(len: usize, additional: usize, capacity: usize) -> usize {
         len.checked_add(additional)

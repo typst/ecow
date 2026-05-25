@@ -160,8 +160,7 @@ impl EcoString {
 
     /// Insert the given character at the index.
     pub fn insert(&mut self, index: usize, c: char) {
-        assert!(self.is_char_boundary(index));
-        self.0.insert_slice(index, c.encode_utf8(&mut [0; 4]).as_bytes());
+        self.insert_str(index, c.encode_utf8(&mut [0; 4]));
     }
 
     /// Insert the given string slice at the index.

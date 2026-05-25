@@ -1,6 +1,6 @@
 use core::mem::{self, ManuallyDrop};
+use core::ops::RangeBounds;
 use core::ptr;
-use std::ops::RangeBounds;
 
 use super::EcoVec;
 
@@ -395,15 +395,11 @@ impl InlineVec {
             unsafe {
                 // Safety: Checked that `index <= len` and
                 // `len + bytes.len() == grown < LIMIT`.
-                core::ptr::copy(ptr.add(index), ptr.add(index + bytes.len()), tail_len);
+                ptr::copy(ptr.add(index), ptr.add(index + bytes.len()), tail_len);
 
                 // Safety: Checked that `index <= len` and
                 // `len + bytes.len() == grown < LIMIT`.
-                core::ptr::copy_nonoverlapping(
-                    bytes.as_ptr(),
-                    ptr.add(index),
-                    bytes.len(),
-                );
+                ptr::copy_nonoverlapping(bytes.as_ptr(), ptr.add(index), bytes.len());
 
                 // Safety: Checked that `grown < LIMIT`
                 self.set_len(grown);
@@ -438,7 +434,7 @@ impl InlineVec {
         let ptr = self.buf.as_mut_ptr();
         unsafe {
             // Safety: The range is in bounds
-            core::ptr::copy(ptr.add(range.end), ptr.add(range.start), tail_len);
+            ptr::copy(ptr.add(range.end), ptr.add(range.start), tail_len);
 
             // Safety: Checked that it's smaller than the current length,
             // which cannot exceed LIMIT itself.

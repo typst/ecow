@@ -1,4 +1,4 @@
-//! Ported from the rust standard libaray.
+//! Ported from the Rust standard library.
 //! Copyright (c) The Rust Project Contributors
 //! See NOTICE for full attribution.
 

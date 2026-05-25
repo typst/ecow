@@ -1,4 +1,4 @@
- Licenses for third party components used by this project can be found below.
+Licenses for third party components used by this project can be found below.
 
 ================================================================================
 The MIT License applies to:
@@ -13,6 +13,10 @@ The MIT License applies to:
 
 * The code in `src/vendor/vec/splice.rs` which is adapted from the Rust standard library.
   (https://github.com/rust-lang/rust/blob/3ea2fbcb2a872b7e1fa3cada256f8e97f9e6636f/library/alloc/src/vec/splice.rs)
+  Copyright (c) The Rust Project Contributors
+
+* The `drain` and `splice` functions in `src/vec.rs` which are adapted from the Rust standard library.
+  (https://github.com/rust-lang/rust/blob/3ea2fbcb2a872b7e1fa3cada256f8e97f9e6636f/library/alloc/src/vec/mod.rs)
   Copyright (c) The Rust Project Contributors
 
 The MIT License (MIT)

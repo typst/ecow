@@ -1,4 +1,4 @@
-//! Ported from the rust standard libaray.
+//! Ported from the Rust standard library.
 //! Copyright (c) The Rust Project Contributors
 //! See NOTICE for full attribution.
 
@@ -12,7 +12,6 @@ use super::Drain;
 /// A splicing iterator for [`EcoVec`].
 ///
 /// This struct is created by [`EcoVec::splice()`].
-/// See its documentation for more.
 #[derive(Debug)]
 pub struct Splice<'a, I: Iterator + 'a>
 where
@@ -135,6 +134,11 @@ impl<T: Clone> Drain<'_, T> {
         let capacity = vec.capacity();
         if additional > capacity - len {
             let target = EcoVec::<T>::amortized_cap(len, additional, capacity);
+
+            // Safety
+            // - The invariant of `vec` says that the ref count is `1`.
+            // - The `target` capacity is greater than the current capacity
+            //   because of how `amortized_cap` works.
             vec.grow(target);
         }
 

@@ -1,4 +1,4 @@
-//! Ported from the rust standard libaray.
+//! Ported from the Rust standard library.
 //! Copyright (c) The Rust Project Contributors
 //! See NOTICE for full attribution.
 
@@ -34,16 +34,6 @@ impl<T: fmt::Debug> fmt::Debug for Drain<'_, T> {
 
 impl<'a, T> Drain<'a, T> {
     /// Returns the remaining items of this iterator as a slice.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut vec = vec!['a', 'b', 'c'];
-    /// let mut drain = vec.drain(..);
-    /// assert_eq!(drain.as_slice(), &['a', 'b', 'c']);
-    /// let _ = drain.next().unwrap();
-    /// assert_eq!(drain.as_slice(), &['b', 'c']);
-    /// ```
     #[must_use]
     pub fn as_slice(&self) -> &[T] {
         self.iter.as_slice()
@@ -116,10 +106,11 @@ impl<T> Drop for Drain<'_, T> {
                 let old_len = vec.len();
                 vec.set_len(old_len + drop_len + self.tail_len);
 
-                // Safety: the invariant of `vec` says that the ref count is `1`
-                // and `old_len + self.tail_len` is smaller than the real length
-                // of the vec, which has been modified upon construction of the
-                // `Drain` struct.
+                // Safety:
+                // - The invariant of `vec` says that the ref count is `1`.
+                // - The `old_len + self.tail_len` is smaller than the real
+                //   length of the vec, which has been modified upon
+                //   construction of the `Drain` struct.
                 vec.truncate_unchecked(old_len + self.tail_len);
             }
 
