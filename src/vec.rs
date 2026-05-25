@@ -464,7 +464,7 @@ impl<T: Clone> EcoVec<T> {
             let mut vec = Self::with_capacity(target);
             unsafe {
                 // Safety:
-                // Slice iterator implements ExactSizeIterator.
+                // - Slice iterator implements `TrustedLen`.
                 vec.extend_from_trusted(self.iter().cloned());
             }
             *self = vec;
