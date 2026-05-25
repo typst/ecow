@@ -507,7 +507,11 @@ impl<T: Clone> EcoVec<T> {
 
         if !self.is_unique() {
             let mut vec = Self::with_capacity(target);
-            vec.extend(self.iter().cloned());
+            unsafe {
+                // Safety:
+                // - Slice iterator implements `TrustedLen`.
+                vec.extend_from_trusted(self.iter().cloned());
+            }
             *self = vec;
         } else if target > capacity {
             unsafe {
