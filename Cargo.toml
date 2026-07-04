@@ -12,7 +12,7 @@ categories = ["data-structures", "no-std"]
 keywords = ["string", "vector", "hash", "hashmap", "map", "sso", "cow"]
 
 [features]
-default = ["std", "sync"]
+default = ["std"]
 std = []
 sync = ["dep:rayon", "hashbrown/rayon"]
 
