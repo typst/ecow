@@ -1,5 +1,5 @@
 /*!
-Compact, clone-on-write vector and string.
+Compact, clone-on-write data structures.
 
 ## Types
 - An [`EcoVec`] is a reference-counted clone-on-write vector. It takes up two
@@ -10,6 +10,12 @@ Compact, clone-on-write vector and string.
 - An [`EcoString`] is a reference-counted clone-on-write string with inline
   storage. It takes up 16 bytes of space. It has 15 bytes of inline storage and
   starting from 16 bytes it becomes an [`EcoVec<u8>`].
+
+- An [`EcoMap`] is an inline-first, reference-counted clone-on-write hash map.
+  It stores elements entirely inline on the stack up to a customizable capacity
+  `N = 8` using high-performance linear probing. Upon hitting capacity, it automatically
+  spills out-of-line into an `Rc<HashMap>`, allowing cheap clone-on-write semantics
+  for large maps.
 
 ## Example
 ```
@@ -36,6 +42,7 @@ assert_eq!(third, "Welcome to earth! ");
 | [`Arc<[T]>`] / [`Arc<str>`]       | While these require only one allocation, they aren't mutable. |
 | Small vector                      | Different trade-off. Great when there are few, small `T`s, but expensive to clone when spilled to the heap. |
 | Small string                      | The [`EcoString`] combines different small string qualities into a very practical package: It has inline storage, a smaller footprint than a normal [`String`][string], is efficient to clone even when spilled, and at the same time mutable. |
+| [`HashMap<K, V>`]                 | Normal hash maps allocate on the heap immediately on creation, take up 6 or more words of space, and require deep-copying every entry when cloned. The [`EcoMap`] allocates nothing while inline, probes with zero heap overhead for small sets, and clones instantly using `Rc` when spilled. |
 */
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -45,12 +52,14 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
+pub mod map;
 pub mod string;
 pub mod vec;
 
 mod dynamic;
 mod vendor;
 
+pub use self::map::EcoMap;
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;
 
