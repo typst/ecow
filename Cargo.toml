@@ -12,7 +12,7 @@ categories = ["data-structures", "no-std"]
 keywords = ["string", "vector", "sso", "cow"]
 
 [features]
-default = []
+default = ["std"]
 std = []
 
 [dependencies]
