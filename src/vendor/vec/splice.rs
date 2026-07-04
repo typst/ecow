@@ -5,6 +5,9 @@
 use core::ptr;
 use core::slice;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use crate::EcoVec;
 
 use super::Drain;
