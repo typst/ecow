@@ -26,6 +26,10 @@ jobs:
             components: rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
+      - name: Check no_std
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --no-default-features
       - name: Check check
         env:
           RUSTFLAGS: -D warnings
