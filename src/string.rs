@@ -26,9 +26,9 @@ use crate::dynamic::{DynamicVec, InlineVec};
 #[clippy::format_args]
 macro_rules! eco_format {
     ($($tts:tt)*) => {{
-        use ::std::fmt::Write;
+        use ::core::fmt::Write;
         let mut s = $crate::EcoString::new();
-        ::std::write!(s, $($tts)*).unwrap();
+        ::core::write!(s, $($tts)*).unwrap();
         s
     }};
 }

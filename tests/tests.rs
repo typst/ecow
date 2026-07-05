@@ -10,7 +10,7 @@ use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
 use ecow::string::ToEcoString;
-use ecow::{eco_vec, EcoString, EcoVec};
+use ecow::{eco_format, eco_vec, EcoString, EcoVec};
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
 const LIMIT: usize = EcoString::INLINE_LIMIT;
@@ -369,6 +369,14 @@ fn test_array_from_vec() {
     assert_eq!(c, array);
 
     assert_eq!(<[String; 0]>::try_from(EcoVec::new()).unwrap(), <[String; 0]>::default());
+}
+
+#[test]
+fn test_str_macro() {
+    assert_eq!(
+        eco_format!("Hello, {}! The secret number is {}.", "world".to_owned(), 42),
+        "Hello, world! The secret number is 42."
+    );
 }
 
 #[test]
