@@ -1,62 +1,57 @@
-name: CI
+name: Continuous integration
+on: [push, pull_request]
 
-on:
-  push:
-  pull_request:
-  schedule:
-    # Run weekly to keep Rust toolchain changes fresh
-    - cron: '0 0 * * 1'
+env:
+  RUSTFLAGS: "-Dwarnings"
+  RUSTDOCFLAGS: "-Dwarnings"
+
+permissions:
+  contents: read
 
 jobs:
-  multiple_toolchains:
-    name: Stable and Beta tasks
+  tests:
+    name: Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - 1.73
-          - beta
-
     steps:
-      - uses: actions/checkout@v3
-      - name: Install ${{ matrix.rust }} toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-            toolchain: ${{ matrix.rust }}
-            components: rustfmt
-      - name: Check formatting
-        run: cargo fmt --all --check
-      - name: Check no_std
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check --no-default-features
-      - name: Check check
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check
-      - name: Run test suite
-        run: cargo test
-      - name: Check docs
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --document-private-items
-      - name: Run loom tests
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@a75363d06101555fc97c6c7e1e65670b99104d98 # 1.96.1
+      - run: cargo test --all-features --no-run
+      - run: cargo test --all-features --no-fail-fast
+      - run: cargo test --release loom --features loom
         env:
           RUSTFLAGS: --cfg loom
-        run: cargo test --release loom --features loom
+      - run: git diff --exit-code
 
-  # We use a healthy amount of unsafe, so run tests with Miri to check for UB
-  nightly_only:
-    name: Nightly tasks
+  checks:
+    name: Check clippy, formatting, and documentation
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v3
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@a75363d06101555fc97c6c7e1e65670b99104d98 # 1.96.1
         with:
-            toolchain: nightly
-            components: miri
+          components: clippy, rustfmt
+      - run: cargo clippy --all-targets --all-features
+      - run: cargo clippy --all-targets --no-default-features
+      - run: cargo fmt --check
+      - run: cargo doc --no-deps --document-private-items
+
+  min-version:
+    name: Check minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@f8e4c262c5e54db7eedbb44479f7a9529947d9cb # 1.73
+      - run: cargo check
+
+  miri:
+    name: Check unsafe code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          components: miri
+          toolchain: nightly-2025-10-28
       - name: Miri 64-bit LE
         run: cargo miri test --target x86_64-unknown-linux-gnu
       - name: Miri 64-bit BE
