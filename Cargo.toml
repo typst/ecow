@@ -4,19 +4,22 @@ version = "0.3.0"
 rust-version = "1.73" # also change in ci.yml
 authors = ["Laurenz <laurmaedje@gmail.com>"]
 edition = "2021"
-description = "Compact, clone-on-write vector and string."
+description = "Compact, clone-on-write data structures."
 repository = "https://github.com/typst/ecow"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 categories = ["data-structures", "no-std"]
-keywords = ["string", "vector", "sso", "cow"]
+keywords = ["string", "vector", "hash", "hashmap", "map", "sso", "cow"]
 
 [features]
 default = ["std"]
 std = []
+sync = ["dep:rayon", "hashbrown/rayon"]
 
 [dependencies]
 serde = { version = "1.0", optional = true, default-features = false }
+rayon = { version = "1.12", optional = true }
+hashbrown = { version = "0.17" }
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.7", optional = true }
