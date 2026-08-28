@@ -15,7 +15,7 @@ use std::path::Path;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 
-use crate::dynamic::{DynamicVec, InlineVec};
+use crate::bytes::{EcoBytes, InlineVec};
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
@@ -66,7 +66,7 @@ macro_rules! eco_format {
 /// 64-bit big-endian systems, the type's size increases to 24 bytes and the
 /// amount of inline storage to 23 bytes.
 #[derive(Clone)]
-pub struct EcoString(DynamicVec);
+pub struct EcoString(EcoBytes);
 
 impl EcoString {
     /// Maximum number of bytes for an inline `EcoString` before spilling on
@@ -76,12 +76,12 @@ impl EcoString {
     ///
     /// # Note
     /// This value is semver exempt and can be changed with any update.
-    pub const INLINE_LIMIT: usize = crate::dynamic::LIMIT;
+    pub const INLINE_LIMIT: usize = crate::bytes::LIMIT;
 
     /// Create a new, empty string.
     #[inline]
     pub const fn new() -> Self {
-        Self(DynamicVec::new())
+        Self(EcoBytes::new())
     }
 
     /// Create a new, inline string.
@@ -93,19 +93,19 @@ impl EcoString {
         let Ok(inline) = InlineVec::from_slice(string.as_bytes()) else {
             exceeded_inline_capacity();
         };
-        Self(DynamicVec::from_inline(inline))
+        Self(EcoBytes::from_inline(inline))
     }
 
     /// Create a new, empty string with the given `capacity`.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(DynamicVec::with_capacity(capacity))
+        Self(EcoBytes::with_capacity(capacity))
     }
 
     /// Create an instance from a string slice.
     #[inline]
     fn from_str(string: &str) -> Self {
-        Self(DynamicVec::from_slice(string.as_bytes()))
+        Self(EcoBytes::from_slice(string.as_bytes()))
     }
 
     /// Whether the string is empty.
@@ -284,7 +284,7 @@ impl EcoString {
     pub fn repeat(&self, n: usize) -> Self {
         let slice = self.as_bytes();
         let capacity = slice.len().saturating_mul(n);
-        let mut vec = DynamicVec::with_capacity(capacity);
+        let mut vec = EcoBytes::with_capacity(capacity);
         for _ in 0..n {
             vec.extend_from_slice(slice);
         }

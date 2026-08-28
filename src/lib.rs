@@ -48,7 +48,7 @@ extern crate alloc;
 pub mod string;
 pub mod vec;
 
-mod dynamic;
+mod bytes;
 mod vendor;
 
 pub use self::string::EcoString;

@@ -6,7 +6,7 @@ use super::EcoVec;
 
 /// A byte vector that can hold up to 15 bytes inline and then spills to an
 /// `EcoVec<u8>`.
-pub(crate) struct DynamicVec(Repr);
+pub(crate) struct EcoBytes(Repr);
 
 /// The internal representation.
 ///
@@ -63,7 +63,7 @@ const LEN_TAG: u8 = 0b1000_0000;
 /// This is used to mask off the tag to get the inline variant's length.
 const LEN_MASK: u8 = 0b0111_1111;
 
-impl DynamicVec {
+impl EcoBytes {
     #[inline]
     pub const fn new() -> Self {
         Self::from_inline(InlineVec::new())
@@ -213,7 +213,7 @@ impl DynamicVec {
     }
 }
 
-impl DynamicVec {
+impl EcoBytes {
     // If this returns true, guarantees that `self.0.inline` is initialized.
     // Otherwise, guarantees that `self.0.spilled` is initialized.
     #[inline]
@@ -256,7 +256,7 @@ impl DynamicVec {
     }
 }
 
-impl Clone for DynamicVec {
+impl Clone for EcoBytes {
     #[inline]
     fn clone(&self) -> Self {
         match self.variant() {
@@ -266,7 +266,7 @@ impl Clone for DynamicVec {
     }
 }
 
-impl Drop for DynamicVec {
+impl Drop for EcoBytes {
     #[inline]
     fn drop(&mut self) {
         if let VariantMut::Spilled(spilled) = self.variant_mut() {
