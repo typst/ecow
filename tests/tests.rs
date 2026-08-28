@@ -10,7 +10,7 @@ use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering::*};
 
 use ecow::string::ToEcoString;
-use ecow::{eco_format, eco_vec, EcoString, EcoVec};
+use ecow::{eco_format, eco_vec, EcoBytes, EcoString, EcoVec};
 
 const ALPH: &str = "abcdefghijklmnopqrstuvwxyz";
 const LIMIT: usize = EcoString::INLINE_LIMIT;
@@ -24,6 +24,8 @@ fn test_mem_size() {
     let word = mem::size_of::<usize>();
     assert_eq!(mem::size_of::<EcoVec<u8>>(), 2 * word);
     assert_eq!(mem::size_of::<Option<EcoVec<u8>>>(), 2 * word);
+    assert_eq!(mem::size_of::<EcoBytes>(), mem::size_of::<EcoString>());
+    assert_eq!(mem::size_of::<Option<EcoBytes>>(), mem::size_of::<Option<EcoString>>());
 
     if cfg!(target_endian = "little") {
         if cfg!(target_pointer_width = "32") {
@@ -372,6 +374,105 @@ fn test_array_from_vec() {
 }
 
 #[test]
+fn test_bytes_new() {
+    assert_eq!(EcoBytes::new(), &[]);
+    assert_eq!(EcoBytes::from([1, 2, 3]), [1, 2, 3]);
+
+    let inline = EcoBytes::from(&ALPH.as_bytes()[..LIMIT]);
+    let spilled = EcoBytes::from(&ALPH.as_bytes()[..LIMIT + 1]);
+    assert!(inline.is_inline());
+    assert!(!spilled.is_inline());
+}
+
+#[test]
+fn test_bytes_inline_okay() {
+    const BYTES: EcoBytes = EcoBytes::inline(b"hello");
+    assert_eq!(BYTES, b"hello");
+    assert_eq!(EcoBytes::try_inline(b"hello").unwrap(), b"hello");
+    assert!(EcoBytes::try_inline(ALPH.as_bytes()).is_none());
+}
+
+#[test]
+#[should_panic(expected = "exceeded inline capacity")]
+fn test_bytes_inline_capacity_exceeded() {
+    EcoBytes::inline(ALPH.as_bytes());
+}
+
+#[test]
+fn test_bytes_push() {
+    let mut bytes = EcoBytes::from(&ALPH.as_bytes()[..LIMIT]);
+    let original = bytes.clone();
+
+    bytes.push(b'!');
+    assert_eq!(bytes.pop(), Some(b'!'));
+    assert_eq!(bytes, original);
+    assert!(!bytes.is_inline());
+}
+
+#[test]
+fn test_bytes_insert() {
+    let mut bytes = EcoBytes::from([1, 2, 3]);
+    bytes.insert(1, 4);
+    assert_eq!(bytes, [1, 4, 2, 3]);
+
+    let mut bytes = EcoBytes::from(&ALPH.as_bytes()[..LIMIT]);
+    bytes.insert(LIMIT / 2, b'_');
+    assert_eq!(bytes[LIMIT / 2], b'_');
+    assert!(!bytes.is_inline());
+}
+
+#[test]
+#[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
+fn test_bytes_insert_fail() {
+    EcoBytes::from([1, 2, 3]).insert(4, 0);
+}
+
+#[test]
+fn test_bytes_remove() {
+    let mut bytes = EcoBytes::from([1, 2, 3]);
+    assert_eq!(bytes.remove(1), 2);
+    assert_eq!(bytes, [1, 3]);
+
+    let mut bytes = EcoBytes::from(ALPH.as_bytes());
+    let clone = bytes.clone();
+    assert_eq!(bytes.remove(1), b'b');
+    assert_eq!(clone, ALPH.as_bytes());
+}
+
+#[test]
+#[should_panic(expected = "index is out bounds (index: 4, len: 3)")]
+fn test_bytes_remove_fail() {
+    EcoBytes::from([1, 2, 3]).remove(4);
+}
+
+#[test]
+fn test_bytes_make_mut() {
+    let mut first = EcoBytes::from(ALPH.as_bytes());
+    let second = first.clone();
+    first.make_mut()[0] = b'A';
+    assert_eq!(first[0], b'A');
+    assert_eq!(second[0], b'a');
+}
+
+#[test]
+fn test_bytes_conversions() {
+    let string = EcoString::from(ALPH);
+    let ptr = string.as_ptr();
+    let bytes = EcoBytes::from(string);
+    assert_eq!(bytes.as_ptr(), ptr);
+
+    let string = EcoString::try_from(bytes).unwrap();
+    assert_eq!(string.as_ptr(), ptr);
+    assert_eq!(string, ALPH);
+    assert!(EcoString::try_from(EcoBytes::from([0xFF])).is_err());
+
+    let vec = EcoVec::from(*b"abcdefghijklmnopqrstuvwxyz");
+    let ptr = vec.as_ptr();
+    let bytes = EcoBytes::from(vec);
+    assert_eq!(EcoVec::from(bytes).as_ptr(), ptr);
+}
+
+#[test]
 fn test_str_macro() {
     assert_eq!(
         eco_format!("Hello, {}! The secret number is {}.", "world".to_owned(), 42),
@@ -541,6 +642,10 @@ fn test_str_repeat() {
 #[test]
 fn test_str_inline_okay() {
     assert_eq!(EcoString::inline("hello"), "hello");
+    assert_eq!(EcoString::try_inline("hello").unwrap(), "hello");
+    assert!(EcoString::try_inline(ALPH).is_none());
+    assert!(EcoString::from("hello").is_inline());
+    assert!(!EcoString::from(ALPH).is_inline());
 }
 
 #[test]

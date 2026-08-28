@@ -16,6 +16,7 @@ use std::path::Path;
 use alloc::string::String;
 
 use crate::bytes::{EcoBytes, InlineVec};
+use crate::EcoVec;
 
 /// Create a new [`EcoString`] from a format string.
 /// ```
@@ -76,7 +77,7 @@ impl EcoString {
     ///
     /// # Note
     /// This value is semver exempt and can be changed with any update.
-    pub const INLINE_LIMIT: usize = crate::bytes::LIMIT;
+    pub const INLINE_LIMIT: usize = EcoBytes::INLINE_LIMIT;
 
     /// Create a new, empty string.
     #[inline]
@@ -90,10 +91,19 @@ impl EcoString {
     /// storage.
     #[inline]
     pub const fn inline(string: &str) -> Self {
-        let Ok(inline) = InlineVec::from_slice(string.as_bytes()) else {
-            exceeded_inline_capacity();
-        };
-        Self(EcoBytes::from_inline(inline))
+        Self(EcoBytes::inline(string.as_bytes()))
+    }
+
+    /// Try to create a new, inline string.
+    ///
+    /// Returns `None` if the string's length exceeds the capacity of the inline
+    /// storage.
+    #[inline]
+    pub const fn try_inline(string: &str) -> Option<Self> {
+        match InlineVec::from_slice(string.as_bytes()) {
+            Ok(inline) => Some(Self(EcoBytes::from_inline(inline))),
+            Err(()) => None,
+        }
     }
 
     /// Create a new, empty string with the given `capacity`.
@@ -105,13 +115,19 @@ impl EcoString {
     /// Create an instance from a string slice.
     #[inline]
     fn from_str(string: &str) -> Self {
-        Self(EcoBytes::from_slice(string.as_bytes()))
+        Self(EcoBytes::from(string.as_bytes()))
     }
 
     /// Whether the string is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Whether this string is stored inline.
+    #[inline]
+    pub fn is_inline(&self) -> bool {
+        self.0.is_inline()
     }
 
     /// The length of the string in bytes.
@@ -282,13 +298,7 @@ impl EcoString {
 
     /// Repeat this string `n` times.
     pub fn repeat(&self, n: usize) -> Self {
-        let slice = self.as_bytes();
-        let capacity = slice.len().saturating_mul(n);
-        let mut vec = EcoBytes::with_capacity(capacity);
-        for _ in 0..n {
-            vec.extend_from_slice(slice);
-        }
-        Self(vec)
+        Self(self.0.repeat(n))
     }
 }
 
@@ -585,6 +595,44 @@ impl From<&EcoString> for String {
     }
 }
 
+impl From<EcoString> for EcoBytes {
+    /// This does not allocate.
+    #[inline]
+    fn from(string: EcoString) -> Self {
+        string.0
+    }
+}
+
+impl TryFrom<EcoBytes> for EcoString {
+    type Error = core::str::Utf8Error;
+
+    /// This validates UTF-8 without allocating.
+    #[inline]
+    fn try_from(bytes: EcoBytes) -> Result<Self, Self::Error> {
+        core::str::from_utf8(&bytes)?;
+        Ok(Self(bytes))
+    }
+}
+
+impl From<EcoString> for EcoVec<u8> {
+    /// When the string is stored inline, this needs to allocate to change the
+    /// layout. Otherwise, it reuses the existing allocation.
+    #[inline]
+    fn from(string: EcoString) -> Self {
+        string.0.into()
+    }
+}
+
+impl TryFrom<EcoVec<u8>> for EcoString {
+    type Error = core::str::Utf8Error;
+
+    /// This validates UTF-8 without allocating.
+    #[inline]
+    fn try_from(bytes: EcoVec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from(EcoBytes::from(bytes))
+    }
+}
+
 impl FromStr for EcoString {
     type Err = core::convert::Infallible;
 
@@ -607,11 +655,6 @@ impl<T: Display + ?Sized> ToEcoString for T {
     fn to_eco_string(&self) -> EcoString {
         eco_format!("{self}")
     }
-}
-
-#[cold]
-const fn exceeded_inline_capacity() -> ! {
-    panic!("exceeded inline capacity");
 }
 
 #[cfg(feature = "serde")]

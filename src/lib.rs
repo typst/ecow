@@ -1,15 +1,19 @@
 /*!
-Compact, clone-on-write vector and string.
+Compact, clone-on-write vector, string, and byte buffer.
 
 ## Types
-- An [`EcoVec`] is a reference-counted clone-on-write vector. It takes up two
+- [`EcoVec`] is a reference-counted clone-on-write vector. It takes up two
   words of space (= 2 usize) and has the same memory layout as a `&[T]` slice.
   Within its allocation, it stores a reference count, its capacity and its
   elements.
 
-- An [`EcoString`] is a reference-counted clone-on-write string with inline
+- [`EcoString`] is a reference-counted clone-on-write string with inline
   storage. It takes up 16 bytes of space. It has 15 bytes of inline storage and
   starting from 16 bytes it becomes an [`EcoVec<u8>`].
+
+- [`EcoBytes`] is a reference-counted clone-on-write byte buffer with inline
+  storage. Like an [`EcoString`], it takes up 16 bytes and stores up to 15 bytes
+  inline before spilling to an [`EcoVec<u8>`].
 
 ## Example
 ```
@@ -45,12 +49,13 @@ assert_eq!(third, "Welcome to earth! ");
 
 extern crate alloc;
 
+pub mod bytes;
 pub mod string;
 pub mod vec;
 
-mod bytes;
 mod vendor;
 
+pub use self::bytes::EcoBytes;
 pub use self::string::EcoString;
 pub use self::vec::EcoVec;
 
