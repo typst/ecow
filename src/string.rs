@@ -136,6 +136,15 @@ impl EcoString {
         self.0.len()
     }
 
+    /// How many bytes the string can hold without (re-)allocating.
+    ///
+    /// If the string's heap allocation is shared, mutation can still allocate
+    /// even when the requested length fits within this capacity.
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
+
     /// A string slice containing the entire string.
     #[inline]
     pub fn as_str(&self) -> &str {
@@ -250,6 +259,14 @@ impl EcoString {
         // Safety: Copied from std.
         result.push_str(unsafe { self.get_unchecked(last_end..self.len()) });
         result
+    }
+
+    /// Reserves space for at least `additional` more bytes.
+    ///
+    /// Guarantees that the resulting string has space for `additional` more
+    /// bytes and, if spilled, uniquely owns its backing allocation.
+    pub fn reserve(&mut self, additional: usize) {
+        self.0.reserve(additional);
     }
 
     /// Returns the lowercase equivalent of this string.
