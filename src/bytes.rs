@@ -153,7 +153,7 @@ impl EcoBytes {
         Self(repr)
     }
 
-    /// Create a new, empty byte buffer with at least the specified capacity.
+    /// Creates a new, empty byte buffer with at least the specified capacity.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity <= LIMIT {
@@ -178,7 +178,7 @@ impl EcoBytes {
         }
     }
 
-    /// How many bytes the buffer can hold without allocating.
+    /// How many bytes the buffer can hold without (re-)allocating.
     ///
     /// If the buffer's heap allocation is shared, mutation can still allocate
     /// even when the requested length fits within this capacity.
@@ -190,6 +190,22 @@ impl EcoBytes {
         }
     }
 
+    /// Whether this byte buffer is stored inline.
+    // If this returns true, guarantees that `self.0.inline` is initialized.
+    // Otherwise, guarantees that `self.0.spilled` is initialized.
+    #[inline]
+    pub fn is_inline(&self) -> bool {
+        // Safety:
+        // We always initialize tagged_len, even for the `EcoVec` variant. For
+        // the inline variant the highest-order bit is always `1`. For the
+        // spilled variant, it is initialized with `0` and cannot deviate from
+        // that because the EcoVec's `len` field is bounded by `isize::MAX`. (At
+        // least on 64-bit little endian; on 32-bit or big-endian the EcoVec
+        // and tagged_len fields don't even overlap, meaning tagged_len stays at
+        // its initial value.)
+        unsafe { self.0.inline.tagged_len & LEN_TAG != 0 }
+    }
+
     /// Extracts a slice containing the entire buffer.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
@@ -199,9 +215,10 @@ impl EcoBytes {
         }
     }
 
-    /// Produce a mutable slice containing the entire buffer.
+    /// Produces a mutable slice containing the entire buffer.
     ///
-    /// Clones the buffer if its reference count is larger than 1.
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     #[inline]
     pub fn make_mut(&mut self) -> &mut [u8] {
         match self.variant_mut() {
@@ -210,9 +227,10 @@ impl EcoBytes {
         }
     }
 
-    /// Add a byte at the end of the buffer.
+    /// Adds a byte at the end of the buffer.
     ///
-    /// Clones the buffer if its reference count is larger than 1.
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     #[inline]
     pub fn push(&mut self, byte: u8) {
         match self.variant_mut() {
@@ -234,7 +252,8 @@ impl EcoBytes {
     /// Removes and returns the last byte, or returns `None` if the buffer is
     /// empty.
     ///
-    /// Clones the buffer if its reference count is larger than 1.
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     #[inline]
     pub fn pop(&mut self) -> Option<u8> {
         match self.variant_mut() {
@@ -243,10 +262,11 @@ impl EcoBytes {
         }
     }
 
-    /// Inserts a byte at an index within the buffer, shifting all bytes after it
-    /// to the right.
+    /// Inserts a byte at an `index` within the buffer, shifting all bytes after
+    /// it to the right.
     ///
-    /// Clones the buffer if its reference count is larger than 1.
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     ///
     /// Panics if `index > len`.
     pub fn insert(&mut self, index: usize, byte: u8) {
@@ -267,7 +287,8 @@ impl EcoBytes {
     /// Removes and returns the byte at position index within the buffer,
     /// shifting all bytes after it to the left.
     ///
-    /// Clones the buffer if its reference count is larger than 1.
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     ///
     /// Panics if `index >= len`.
     pub fn remove(&mut self, index: usize) -> u8 {
@@ -278,6 +299,9 @@ impl EcoBytes {
     }
 
     /// Copies and pushes all bytes in a slice to the buffer.
+    ///
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     #[inline]
     pub fn extend_from_slice(&mut self, bytes: &[u8]) {
         if bytes.is_empty() {
@@ -302,7 +326,8 @@ impl EcoBytes {
 
     /// Inserts the given byte slice at the `index`.
     ///
-    /// Clones the buffer if its reference count is larger than 1.
+    /// Clones the buffer if it's spilled and its reference count is larger than
+    /// 1.
     #[inline]
     pub fn insert_slice(&mut self, index: usize, bytes: &[u8]) {
         match self.variant_mut() {
@@ -323,6 +348,19 @@ impl EcoBytes {
         }
     }
 
+    #[inline]
+    pub(crate) fn remove_range<R>(&mut self, range: R)
+    where
+        R: RangeBounds<usize>,
+    {
+        match self.variant_mut() {
+            VariantMut::Inline(inline) => inline.remove_range(range),
+            VariantMut::Spilled(spilled) => {
+                spilled.drain(range);
+            }
+        }
+    }
+
     /// Removes all bytes from the buffer.
     #[inline]
     pub fn clear(&mut self) {
@@ -335,8 +373,8 @@ impl EcoBytes {
     /// Shortens the buffer, keeping the first `target` bytes and dropping the
     /// rest.
     ///
-    /// Clones the buffer if its reference count is larger than 1 and
-    /// `target < len`.
+    /// Clones the buffer if it's spilled, its reference count is larger than
+    /// 1, and `target < len`.
     #[inline]
     pub fn truncate(&mut self, target: usize) {
         match self.variant_mut() {
@@ -345,7 +383,7 @@ impl EcoBytes {
         }
     }
 
-    /// Reserve space for at least `additional` more bytes.
+    /// Reserves space for at least `additional` more bytes.
     ///
     /// Guarantees that the resulting buffer has space for `additional` more
     /// bytes and, if spilled, uniquely owns its backing allocation.
@@ -364,7 +402,7 @@ impl EcoBytes {
         }
     }
 
-    /// Repeat this byte buffer `n` times.
+    /// Repeats this byte buffer `n` times.
     pub fn repeat(&self, n: usize) -> Self {
         let capacity = self.len().saturating_mul(n);
         let mut bytes = Self::with_capacity(capacity);
@@ -373,36 +411,9 @@ impl EcoBytes {
         }
         bytes
     }
+}
 
-    #[inline]
-    pub(crate) fn remove_range<R>(&mut self, range: R)
-    where
-        R: RangeBounds<usize>,
-    {
-        match self.variant_mut() {
-            VariantMut::Inline(inline) => inline.remove_range(range),
-            VariantMut::Spilled(spilled) => {
-                spilled.drain(range);
-            }
-        }
-    }
-
-    /// Whether this byte buffer is stored inline.
-    // If this returns true, guarantees that `self.0.inline` is initialized.
-    // Otherwise, guarantees that `self.0.spilled` is initialized.
-    #[inline]
-    pub fn is_inline(&self) -> bool {
-        // Safety:
-        // We always initialize tagged_len, even for the `EcoVec` variant. For
-        // the inline variant the highest-order bit is always `1`. For the
-        // spilled variant, it is initialized with `0` and cannot deviate from
-        // that because the EcoVec's `len` field is bounded by `isize::MAX`. (At
-        // least on 64-bit little endian; on 32-bit or big-endian the EcoVec
-        // and tagged_len fields don't even overlap, meaning tagged_len stays at
-        // its initial value.)
-        unsafe { self.0.inline.tagged_len & LEN_TAG != 0 }
-    }
-
+impl EcoBytes {
     #[inline]
     fn variant(&self) -> Variant<'_> {
         unsafe {
@@ -452,6 +463,15 @@ impl Drop for EcoBytes {
     }
 }
 
+impl Deref for EcoBytes {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
 impl Default for EcoBytes {
     #[inline]
     fn default() -> Self {
@@ -463,13 +483,6 @@ impl Debug for EcoBytes {
     #[inline]
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Debug::fmt(self.as_slice(), f)
-    }
-}
-
-impl Hash for EcoBytes {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_slice().hash(state);
     }
 }
 
@@ -517,6 +530,13 @@ impl PartialEq<Vec<u8>> for EcoBytes {
     }
 }
 
+impl PartialEq<EcoVec<u8>> for EcoBytes {
+    #[inline]
+    fn eq(&self, other: &EcoVec<u8>) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
 impl PartialEq<EcoBytes> for [u8] {
     #[inline]
     fn eq(&self, other: &EcoBytes) -> bool {
@@ -535,13 +555,6 @@ impl PartialEq<EcoBytes> for Vec<u8> {
     #[inline]
     fn eq(&self, other: &EcoBytes) -> bool {
         self == other.as_slice()
-    }
-}
-
-impl PartialEq<EcoVec<u8>> for EcoBytes {
-    #[inline]
-    fn eq(&self, other: &EcoVec<u8>) -> bool {
-        self.as_slice() == other.as_slice()
     }
 }
 
@@ -566,11 +579,16 @@ impl PartialOrd for EcoBytes {
     }
 }
 
-impl Deref for EcoBytes {
-    type Target = [u8];
-
+impl Hash for EcoBytes {
     #[inline]
-    fn deref(&self) -> &Self::Target {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
+impl AsRef<[u8]> for EcoBytes {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
         self.as_slice()
     }
 }
@@ -578,13 +596,6 @@ impl Deref for EcoBytes {
 impl Borrow<[u8]> for EcoBytes {
     #[inline]
     fn borrow(&self) -> &[u8] {
-        self.as_slice()
-    }
-}
-
-impl AsRef<[u8]> for EcoBytes {
-    #[inline]
-    fn as_ref(&self) -> &[u8] {
         self.as_slice()
     }
 }
@@ -798,14 +809,6 @@ impl InlineVec {
     }
 
     #[inline]
-    pub fn clear(&mut self) {
-        unsafe {
-            // Safety: Trivially, `0 <= LIMIT`.
-            self.set_len(0);
-        }
-    }
-
-    #[inline]
     pub fn push(&mut self, byte: u8) -> Result<(), ()> {
         let len = self.len();
         if let Some(slot) = self.buf.get_mut(len) {
@@ -927,17 +930,6 @@ impl InlineVec {
     }
 
     #[inline]
-    pub fn truncate(&mut self, target: usize) {
-        if target < self.len() {
-            unsafe {
-                // Safety: Checked that it's smaller than the current length,
-                // which cannot exceed LIMIT itself.
-                self.set_len(target);
-            }
-        }
-    }
-
-    #[inline]
     pub fn remove_range<R>(&mut self, range: R)
     where
         R: RangeBounds<usize>,
@@ -955,6 +947,25 @@ impl InlineVec {
             // Safety: Checked that it's smaller than the current length,
             // which cannot exceed LIMIT itself.
             self.set_len(target);
+        }
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        unsafe {
+            // Safety: Trivially, `0 <= LIMIT`.
+            self.set_len(0);
+        }
+    }
+
+    #[inline]
+    pub fn truncate(&mut self, target: usize) {
+        if target < self.len() {
+            unsafe {
+                // Safety: Checked that it's smaller than the current length,
+                // which cannot exceed LIMIT itself.
+                self.set_len(target);
+            }
         }
     }
 }
@@ -986,6 +997,7 @@ impl std::io::Write for EcoBytes {
 #[cfg(feature = "serde")]
 mod serde {
     use super::EcoBytes;
+
     use core::fmt;
     use serde::de::{Deserializer, SeqAccess, Visitor};
 
@@ -995,6 +1007,15 @@ mod serde {
             S: serde::Serializer,
         {
             serializer.serialize_bytes(self.as_slice())
+        }
+    }
+
+    impl<'de> serde::Deserialize<'de> for EcoBytes {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_bytes(EcoBytesVisitor)
         }
     }
 
@@ -1011,7 +1032,8 @@ mod serde {
         where
             A: SeqAccess<'de>,
         {
-            let mut bytes = EcoBytes::with_capacity(seq.size_hint().unwrap_or(0));
+            let len = seq.size_hint().unwrap_or(0);
+            let mut bytes = EcoBytes::with_capacity(len);
             while let Some(byte) = seq.next_element()? {
                 bytes.push(byte);
             }
@@ -1030,15 +1052,6 @@ mod serde {
             E: serde::de::Error,
         {
             self.visit_bytes(string.as_bytes())
-        }
-    }
-
-    impl<'de> serde::Deserialize<'de> for EcoBytes {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            deserializer.deserialize_bytes(EcoBytesVisitor)
         }
     }
 }

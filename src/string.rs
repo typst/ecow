@@ -85,7 +85,7 @@ impl EcoString {
         Self(EcoBytes::new())
     }
 
-    /// Create a new, inline string.
+    /// Creates a new, inline string.
     ///
     /// Panics if the string's length exceeds the capacity of the inline
     /// storage.
@@ -94,7 +94,7 @@ impl EcoString {
         Self(EcoBytes::inline(string.as_bytes()))
     }
 
-    /// Try to create a new, inline string.
+    /// Tries to create a new, inline string.
     ///
     /// Returns `None` if the string's length exceeds the capacity of the inline
     /// storage.
@@ -106,13 +106,13 @@ impl EcoString {
         }
     }
 
-    /// Create a new, empty string with the given `capacity`.
+    /// Creates a new, empty string with the given `capacity`.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self(EcoBytes::with_capacity(capacity))
     }
 
-    /// Create an instance from a string slice.
+    /// Creates an instance from a string slice.
     #[inline]
     fn from_str(string: &str) -> Self {
         Self(EcoBytes::from(string.as_bytes()))
@@ -122,12 +122,6 @@ impl EcoString {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Whether this string is stored inline.
-    #[inline]
-    pub fn is_inline(&self) -> bool {
-        self.0.is_inline()
     }
 
     /// The length of the string in bytes.
@@ -145,6 +139,12 @@ impl EcoString {
         self.0.capacity()
     }
 
+    /// Whether this string is stored inline.
+    #[inline]
+    pub fn is_inline(&self) -> bool {
+        self.0.is_inline()
+    }
+
     /// A string slice containing the entire string.
     #[inline]
     pub fn as_str(&self) -> &str {
@@ -156,7 +156,7 @@ impl EcoString {
         unsafe { core::str::from_utf8_unchecked(self.0.as_slice()) }
     }
 
-    /// Produce a mutable slice containing the entire string.
+    /// Produces a mutable slice containing the entire string.
     ///
     /// Clones the string if its reference count is larger than 1.
     #[inline]
@@ -169,7 +169,7 @@ impl EcoString {
         unsafe { core::str::from_utf8_unchecked_mut(self.0.make_mut()) }
     }
 
-    /// Append the given character at the end.
+    /// Appends the given character at the end.
     #[inline]
     pub fn push(&mut self, c: char) {
         if c.len_utf8() == 1 {
@@ -179,23 +179,7 @@ impl EcoString {
         }
     }
 
-    /// Append the given string slice at the end.
-    pub fn push_str(&mut self, string: &str) {
-        self.0.extend_from_slice(string.as_bytes());
-    }
-
-    /// Insert the given character at the index.
-    pub fn insert(&mut self, index: usize, c: char) {
-        self.insert_str(index, c.encode_utf8(&mut [0; 4]));
-    }
-
-    /// Insert the given string slice at the index.
-    pub fn insert_str(&mut self, index: usize, string: &str) {
-        assert!(self.is_char_boundary(index));
-        self.0.insert_slice(index, string.as_bytes());
-    }
-
-    /// Remove the last character from the string.
+    /// Removes the last character from the string.
     #[inline]
     pub fn pop(&mut self) -> Option<char> {
         let slice = self.as_str();
@@ -204,27 +188,23 @@ impl EcoString {
         Some(c)
     }
 
-    /// Clear the string.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.0.clear();
+    /// Appends the given string slice at the end.
+    pub fn push_str(&mut self, string: &str) {
+        self.0.extend_from_slice(string.as_bytes());
     }
 
-    /// Shortens the string to the specified length.
-    ///
-    /// If `new_len` is greater than or equal to the string's current length,
-    /// this has no effect.
-    ///
-    /// Panics if `new_len` does not lie on a [`char`] boundary.
-    #[inline]
-    pub fn truncate(&mut self, new_len: usize) {
-        if new_len <= self.len() {
-            assert!(self.is_char_boundary(new_len));
-            self.0.truncate(new_len);
-        }
+    /// Inserts the given character at the index.
+    pub fn insert(&mut self, index: usize, c: char) {
+        self.insert_str(index, c.encode_utf8(&mut [0; 4]));
     }
 
-    /// Remove the character at the index.
+    /// Inserts the given string slice at the index.
+    pub fn insert_str(&mut self, index: usize, string: &str) {
+        assert!(self.is_char_boundary(index));
+        self.0.insert_slice(index, string.as_bytes());
+    }
+
+    /// Removes the character at the index.
     pub fn remove(&mut self, index: usize) -> char {
         assert!(self.is_char_boundary(index));
         let char = self[index..].chars().next().unwrap();
@@ -259,6 +239,26 @@ impl EcoString {
         // Safety: Copied from std.
         result.push_str(unsafe { self.get_unchecked(last_end..self.len()) });
         result
+    }
+
+    /// Clears the string.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// Shortens the string to the specified length.
+    ///
+    /// If `new_len` is greater than or equal to the string's current length,
+    /// this has no effect.
+    ///
+    /// Panics if `new_len` does not lie on a [`char`] boundary.
+    #[inline]
+    pub fn truncate(&mut self, new_len: usize) {
+        if new_len <= self.len() {
+            assert!(self.is_char_boundary(new_len));
+            self.0.truncate(new_len);
+        }
     }
 
     /// Reserves space for at least `additional` more bytes.
@@ -313,7 +313,7 @@ impl EcoString {
         s
     }
 
-    /// Repeat this string `n` times.
+    /// Repeats this string `n` times.
     pub fn repeat(&self, n: usize) -> Self {
         Self(self.0.repeat(n))
     }
@@ -550,6 +550,38 @@ impl From<Cow<'_, str>> for EcoString {
     }
 }
 
+impl From<EcoString> for String {
+    /// This needs to allocate to change the layout.
+    #[inline]
+    fn from(s: EcoString) -> Self {
+        s.as_str().into()
+    }
+}
+
+impl From<&EcoString> for String {
+    #[inline]
+    fn from(s: &EcoString) -> Self {
+        s.as_str().into()
+    }
+}
+
+impl From<EcoString> for EcoBytes {
+    /// This does not allocate.
+    #[inline]
+    fn from(string: EcoString) -> Self {
+        string.0
+    }
+}
+
+impl From<EcoString> for EcoVec<u8> {
+    /// When the string is stored inline, this needs to allocate to change the
+    /// layout. Otherwise, it reuses the existing allocation.
+    #[inline]
+    fn from(string: EcoString) -> Self {
+        string.0.into()
+    }
+}
+
 impl FromIterator<char> for EcoString {
     #[inline]
     fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
@@ -597,29 +629,6 @@ impl<'a> Extend<&'a str> for EcoString {
     }
 }
 
-impl From<EcoString> for String {
-    /// This needs to allocate to change the layout.
-    #[inline]
-    fn from(s: EcoString) -> Self {
-        s.as_str().into()
-    }
-}
-
-impl From<&EcoString> for String {
-    #[inline]
-    fn from(s: &EcoString) -> Self {
-        s.as_str().into()
-    }
-}
-
-impl From<EcoString> for EcoBytes {
-    /// This does not allocate.
-    #[inline]
-    fn from(string: EcoString) -> Self {
-        string.0
-    }
-}
-
 impl TryFrom<EcoBytes> for EcoString {
     type Error = core::str::Utf8Error;
 
@@ -628,15 +637,6 @@ impl TryFrom<EcoBytes> for EcoString {
     fn try_from(bytes: EcoBytes) -> Result<Self, Self::Error> {
         core::str::from_utf8(&bytes)?;
         Ok(Self(bytes))
-    }
-}
-
-impl From<EcoString> for EcoVec<u8> {
-    /// When the string is stored inline, this needs to allocate to change the
-    /// layout. Otherwise, it reuses the existing allocation.
-    #[inline]
-    fn from(string: EcoString) -> Self {
-        string.0.into()
     }
 }
 
@@ -676,7 +676,8 @@ impl<T: Display + ?Sized> ToEcoString for T {
 
 #[cfg(feature = "serde")]
 mod serde {
-    use crate::EcoString;
+    use super::EcoString;
+
     use core::fmt;
     use serde::de::{Deserializer, Error, Unexpected, Visitor};
 
@@ -694,34 +695,34 @@ mod serde {
         where
             D: Deserializer<'de>,
         {
-            struct EcoStringVisitor;
-
-            impl Visitor<'_> for EcoStringVisitor {
-                type Value = EcoString;
-
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    formatter.write_str("a string")
-                }
-
-                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-                where
-                    E: Error,
-                {
-                    Ok(EcoString::from(v))
-                }
-
-                fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-                where
-                    E: Error,
-                {
-                    if let Ok(utf8) = core::str::from_utf8(v) {
-                        return Ok(EcoString::from(utf8));
-                    }
-                    Err(Error::invalid_value(Unexpected::Bytes(v), &self))
-                }
-            }
-
             deserializer.deserialize_str(EcoStringVisitor)
+        }
+    }
+
+    struct EcoStringVisitor;
+
+    impl Visitor<'_> for EcoStringVisitor {
+        type Value = EcoString;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(EcoString::from(v))
+        }
+
+        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            if let Ok(utf8) = core::str::from_utf8(v) {
+                return Ok(EcoString::from(utf8));
+            }
+            Err(Error::invalid_value(Unexpected::Bytes(v), &self))
         }
     }
 }

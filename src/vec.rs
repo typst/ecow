@@ -109,7 +109,7 @@ struct Header {
 }
 
 impl<T> EcoVec<T> {
-    /// Create a new, empty vector.
+    /// Creates a new, empty vector.
     ///
     /// This does not allocate.
     #[inline]
@@ -121,7 +121,7 @@ impl<T> EcoVec<T> {
         }
     }
 
-    /// Create a new, empty vector with at least the specified capacity.
+    /// Creates a new, empty vector with at least the specified capacity.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let mut vec = Self::new();
@@ -212,7 +212,7 @@ impl<T> EcoVec<T> {
 }
 
 impl<T: Clone> EcoVec<T> {
-    /// Create a new vector with `n` copies of `value`.
+    /// Creates a new vector with `n` copies of `value`.
     pub fn from_elem(value: T, n: usize) -> Self {
         let mut vec = Self::with_capacity(n);
         for _ in 0..n {
@@ -222,7 +222,7 @@ impl<T: Clone> EcoVec<T> {
         vec
     }
 
-    /// Produce a mutable slice containing the entire vector.
+    /// Produces a mutable slice containing the entire vector.
     ///
     /// Clones the vector if its reference count is larger than 1.
     pub fn make_mut(&mut self) -> &mut [T] {
@@ -236,7 +236,7 @@ impl<T: Clone> EcoVec<T> {
         unsafe { core::slice::from_raw_parts_mut(self.data_mut(), self.len) }
     }
 
-    /// Add a value at the end of the vector.
+    /// Adds a value at the end of the vector.
     ///
     /// Clones the vector if its reference count is larger than 1.
     #[inline]
@@ -250,7 +250,7 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Add a value at the end of the vector, without reallocating.
+    /// Adds a value at the end of the vector, without reallocating.
     ///
     /// You must ensure that `self.is_unique()` and `self.len < self.capacity()`
     /// hold, by calling `EcoVec::with_capacity()` or `EcoVec::reserve()`.
@@ -299,8 +299,8 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Inserts an element at an index within the vector, shifting all elements
-    /// after it to the right.
+    /// Inserts an element at an `index` within the vector, shifting all
+    /// elements after it to the right.
     ///
     /// Clones the vector if its reference count is larger than 1.
     ///
@@ -339,7 +339,7 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Removes and returns the element at position index within the vector,
+    /// Removes and returns the element at position `index` within the vector,
     /// shifting all elements after it to the left.
     ///
     /// Clones the vector if its reference count is larger than 1.
@@ -408,30 +408,6 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Shortens the vector, keeping the first `target` elements and dropping
-    /// the rest.
-    ///
-    /// Clones the vector if its reference count is larger than 1 and
-    /// `target < len`.
-    pub fn truncate(&mut self, target: usize) {
-        if target >= self.len {
-            return;
-        }
-
-        if !self.is_unique() {
-            // Safety: Just checked bounds.
-            *self = Self::from(unsafe { self.get_unchecked(..target) });
-            return;
-        }
-
-        unsafe {
-            // Safety:
-            // - The reference count is `1` because of `is_unique`.
-            // - `target < len` because we checked this above.
-            self.truncate_unchecked(target);
-        }
-    }
-
     /// Removes the subslice indicated by the given range from the vector,
     /// returning a double-ended iterator over the removed subslice.
     ///
@@ -494,7 +470,31 @@ impl<T: Clone> EcoVec<T> {
         }
     }
 
-    /// Reserve space for at least `additional` more elements.
+    /// Shortens the vector, keeping the first `target` elements and dropping
+    /// the rest.
+    ///
+    /// Clones the vector if its reference count is larger than 1 and
+    /// `target < len`.
+    pub fn truncate(&mut self, target: usize) {
+        if target >= self.len {
+            return;
+        }
+
+        if !self.is_unique() {
+            // Safety: Just checked bounds.
+            *self = Self::from(unsafe { self.get_unchecked(..target) });
+            return;
+        }
+
+        unsafe {
+            // Safety:
+            // - The reference count is `1` because of `is_unique`.
+            // - `target < len` because we checked this above.
+            self.truncate_unchecked(target);
+        }
+    }
+
+    /// Reserves space for at least `additional` more elements.
     ///
     /// Guarantees that the resulting vector has reference count `1` and space
     /// for `additional` more elements.
@@ -1387,6 +1387,15 @@ mod serde {
         }
     }
 
+    impl<'de, T: serde::Deserialize<'de> + Clone> serde::Deserialize<'de> for EcoVec<T> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_seq(EcoVecVisitor(PhantomData))
+        }
+    }
+
     struct EcoVecVisitor<T>(PhantomData<T>);
 
     impl<'a, T: serde::Deserialize<'a> + Clone> Visitor<'a> for EcoVecVisitor<T> {
@@ -1406,15 +1415,6 @@ mod serde {
                 values.push(value)
             }
             Ok(values)
-        }
-    }
-
-    impl<'de, T: serde::Deserialize<'de> + Clone> serde::Deserialize<'de> for EcoVec<T> {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            deserializer.deserialize_seq(EcoVecVisitor(PhantomData))
         }
     }
 }
